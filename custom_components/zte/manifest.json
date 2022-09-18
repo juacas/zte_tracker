@@ -1,0 +1,6 @@
+{
+  "domain": "zte",
+  "name": "ZTE Router",
+  "documentation": "Integration of ZTE router. Device tracker and reboot action.",
+  "codeowners": ["@jpdecastro"]
+}
