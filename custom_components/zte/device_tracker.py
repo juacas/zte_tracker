@@ -106,7 +106,7 @@ class zteDeviceScanner(DeviceScanner):
                 # _LOGGER.debug("Device: {0}".format(device))
                 icon = ICONS.get(device['IconType'], None)
                 dev = Device(
-                    device['HostName'].replace('未知设备', 'Unknown'),
+                    device.get('HostName', 'Unknown').replace('未知设备', 'Unknown'),
                     device['IPAddress'],
                     device['MACAddress'],
                     device['Active'],
