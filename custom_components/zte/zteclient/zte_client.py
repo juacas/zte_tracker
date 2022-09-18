@@ -166,11 +166,11 @@ class zteClient:
                 paramname = device[i*2].text
                 paramvalue = device[i*2+1].text
                 if paramname == 'MACAddress':
-                    device_info['mac'] = paramvalue
+                    device_info['MACAddress'] = paramvalue
                 elif paramname == 'IPAddress':
-                    device_info['ip'] = paramvalue
+                    device_info['IPAddress'] = paramvalue
                 elif paramname == 'HostName':
-                    device_info['name'] = paramvalue
+                    device_info['HostName'] = paramvalue
             devices.append(device_info)
         return devices
 
