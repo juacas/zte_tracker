@@ -1,5 +1,5 @@
 # ZTE Router Integration in Home Assistant
-Component to integrate the Huawei ZTE router (tested on model ZTE Pro).
+Component to integrate the Huawei ZTE router (tested on model ZTE F6640).
 
 ## Features
 - Publish the zte.reboot service to reboot the router.
