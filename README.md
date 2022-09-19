@@ -22,3 +22,5 @@ device_tracker:
   new_device_defaults:
     track_new_devices: false
 ```
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
