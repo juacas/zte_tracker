@@ -31,16 +31,9 @@ class zteClient:
         # REBOOT REQUEST
         _LOGGER.info("Requesting reboot")
         try:
-            data = {
-                'csrf': {'csrf_param': self.login_data['csrf_param'], 'csrf_token': self.login_data['csrf_token']}}
-            r = self.session.post('https://{0}/api/service/reboot.cgi'.format(self.host),
-                                  data=json.dumps(data, separators=(',', ':')))
-            data = json.loads(re.search('({.*?})', r.text).group(1))
-            assert data['errcode'] == 0, data
-            _LOGGER.info("Rebooting HG659")
-            return True
+            raise Exception("Not implemented")
         except Exception as e:
-            _LOGGER.error('Failed to reboot: {0} with data {1}'.format(e, data))
+            _LOGGER.error('Failed to reboot: {0}'.format(e))
             return False
         finally:
             self.logout()
@@ -80,15 +73,15 @@ class zteClient:
             self.login_data = r.json()
             # if login need refresh make a new request.
             if self.login_data['login_need_refresh'] == 1:
-                print("REFRESH")
+                _LOGGER.debug("REFRESH")
                 # r = self.session.get('http://{0}/'.format(self.host), verify=False)
                 # self.log_request(r)
             self.statusmsg = None
           
             return True
         except Exception as e:
-            _LOGGER.error('Failed to login: {0}'.format(e))
             self.statusmsg = 'Failed login: {0}'.format(e)
+            _LOGGER.error(self.statusmsg)
             self.login_data = None
             self.session.close()
             return False

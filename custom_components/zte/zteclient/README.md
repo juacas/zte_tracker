@@ -126,3 +126,35 @@ http://10.0.0.1/?_type=menuData&_tag=wlan_client_stat_lua.lua&_=1663483694859
       http://10.0.0.1/?_type=loginData&_tag=logout_entry
 
       IF_LogOff=1
+
+## REBOOT
+      TODO: Implement.
+      
+      POST 
+      http://10.0.0.1/?_type=menuData&_tag=devmgr_restartmgr_lua.lua
+
+      IF_ACTION: Restart
+      Btn_restart: 
+      _sessionTOKEN: 793evTKMtJEPBUNUAT7QPxzy
+
+      Header:
+
+      postDataTmp = "IF_ACTION=Restart&Btn_restart=&_sessionTOKEN=ST0w6eOVJrjgTCK0J72DthuZ"
+      
+      var degistStr = sha256(PostDataTmp);
+      selfHeader["Check"] = asyEncode(degistStr);
+
+       function asyEncode(srcStr) {
+                            var pubKey = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAodPTerkUVCYmv28SOfRV\n7UKHVujx/HjCUTAWy9l0L5H0JV0LfDudTdMNPEKloZsNam3YrtEnq6jqMLJV4ASb\n1d6axmIgJ636wyTUS99gj4BKs6bQSTUSE8h/QkUYv4gEIt3saMS0pZpd90y6+B/9\nhZxZE/RKU8e+zgRqp1/762TB7vcjtjOwXRDEL0w71Jk9i8VUQ59MR1Uj5E8X3WIc\nfYSK5RWBkMhfaTRM6ozS9Bqhi40xlSOb3GBxCmliCifOJNLoO9kFoWgAIw5hkSIb\nGH+4Csop9Uy8VvmmB+B3ubFLN35qIa5OG5+SDXn4L7FeAA5lRiGxRi8tsWrtew8w\nnwIDAQAB\n-----END PUBLIC KEY-----";
+                            var encrypt = new JSEncrypt();
+                            encrypt.setPublicKey(pubKey);
+                            var encrypted = encrypt.encrypt(srcStr);
+                            var dstStr = encrypted.toString();
+                            if (dstStr.length == 0 || dstStr == "false") {
+                                console.log("encrypt key fail!");
+                                dstStr = "";
+                            }
+                            return dstStr;
+                        }
+
+      Check: S4n6BrhHXPAJPNYJNisLU08vgN132770fFgsOuhinbnowOEXgNVE5BEUA2weKxOOUs85A/P/8HfbeKcE9z/ID7FVnCOEj87ZeOWbqs8nO6pjz5ZXchQlWancyw89SsttpbaWOwQFkQpyyVT/zzjukwzVpoReiy7xqXsmrGHvXglJOAtK3o6FWW59AzuT/jeca+JOpXG1hA4sKryi3FQPurQJU3f18QSD1IdEGatePmUi+YKLI+ywzKKiLbJJNiK3oFzph+HIGSr6PdwoUVijqTtMKoT9iTcDdbHV+j1riQiuasAolTCiuLYkyNn0h547OsfvUXLvWQw/YBZ0fS4/yA==

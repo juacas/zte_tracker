@@ -1,2 +1,2 @@
-reboot:
-  description: Reboot the router.
+# reboot:
+#   description: Reboot the router.

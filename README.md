@@ -2,8 +2,8 @@
 Component to integrate the Huawei ZTE router (tested on model ZTE Pro).
 
 ## Features
-- Publish the zte.reboot service to reboot the router.
 - Provides a device_tracker to monitor the connection status of devices.
+- TODO: Publish the zte.reboot service to reboot the router (not implemented yet).
 
 ## Example usage
 
