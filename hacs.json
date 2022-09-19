@@ -1,6 +1,6 @@
 {
   "name": "ZTE tracker",
-  "render_readme": "true",
+  "render_readme": true,
   "domains": ["device_tracker"],
   "iot_class": ["Assumed State", "Local Polling"]
 }
