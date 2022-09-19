@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: módulo",
+            "name": "ZTEclient test",
             "type": "python",
             "request": "launch",
             "module": "tests.test_client",
