@@ -1,5 +1,5 @@
 # ZTE Router Integration in Home Assistant
-Component to integrate the Huawei ZTE router (tested on model ZTE Pro).
+Component to integrate the Huawei ZTE router (tested on model ZTE F6640).
 
 ## Features
 - Provides a device_tracker to monitor the connection status of devices.
@@ -22,3 +22,5 @@ device_tracker:
   new_device_defaults:
     track_new_devices: false
 ```
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
