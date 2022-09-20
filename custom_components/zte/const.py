@@ -1,10 +1,10 @@
-"""Constants for zte."""
+"""Constants for zte_tracker."""
 # Base component constants
-DOMAIN = "zte"
+DOMAIN = "zte_tracker"
 DOMAIN_DATA = "{}_data".format(DOMAIN)
 VERSION = "0.4.1"
 PLATFORMS = ["sensor"]
-ISSUE_URL = "https://github.com/juacas/zte/issues"
+ISSUE_URL = "https://github.com/juacas/zte_tracker/issues"
 
 STARTUP = """
 -------------------------------------------------------------------
@@ -34,7 +34,7 @@ ICONS = {
 # CONF_SCAN_INTERVAL = "scan_interval"
 
 # Defaults
-DEFAULT_NAME = "ZTE router"
+DEFAULT_NAME = "ZTE router tracker"
 
 # Interval in seconds
 INTERVAL = 60

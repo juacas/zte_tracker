@@ -33,9 +33,9 @@ class zteDeviceScanner(DeviceScanner):
         """Initialize the scanner.
         :type cli: zteClient
         """
-        _LOGGER.info("===========================")
-        _LOGGER.info(" ZTE start device Scanner ")
-        _LOGGER.info("===========================")
+        _LOGGER.info("=================================")
+        _LOGGER.info(" ZTE_tracker start device Scanner ")
+        _LOGGER.info("=================================")
         self.router_client = cli
         self.hass = hass
         self.last_results = []
@@ -112,7 +112,7 @@ class zteDeviceScanner(DeviceScanner):
                     device['Active'],
                     icon
                 )
-                #               _LOGGER.debug("Device: {0}".format(dev))
+                # _LOGGER.debug("Device: {0}".format(dev))
                 devices.append(dev)
             return devices
         else:
