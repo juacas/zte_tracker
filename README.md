@@ -1,4 +1,4 @@
-# ZTE Router Integration in Home Assistant
+# ZTE F6640 Router Integration in Home Assistant
 Component to integrate the Huawei ZTE router (tested on model ZTE F6640).
 
 ## Features
