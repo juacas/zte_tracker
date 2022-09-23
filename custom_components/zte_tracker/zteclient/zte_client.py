@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 
 _LOGGER = logging.getLogger(__name__)
-
+_LOGGER.setLevel(logging.DEBUG)
 
 class zteClient:
     def __init__(self, host, username, password):
@@ -119,26 +119,51 @@ class zteClient:
             self.login_data = None
 
     def get_devices_response(self):
-        """Get the raw string with the devices from the router."""
+        """
+        Get the list of devices
+        """
+        lan_devices = self.get_lan_devices()
+        wifi_devices = self.get_wifi_devices()
+        devices = wifi_devices + lan_devices
+        return devices
+
+    def get_lan_devices(self):
+        """
+        Get the list of devices connected to the LAN ports
+        :return: list of devices
+        """
+        # GET DEVICES RESPONSE from http://10.0.0.1/?_type=menuData&_tag=accessdev_homepage_lua.lua&InstNum=5&_=1663922344910
+        try:
+            r= self.session.get('http://{0}/?_type=menuView&_tag=localNetStatus&_={1}'.format(self.host, self.get_guid()),verify=False)
+            r= self.session.get('http://{0}/?_type=menuData&_tag=accessdev_landevs_lua.lua&InstNum=5&_{1}'.format(self.host, self.get_guid()),verify=False)
+            self.log_request(r)
+            devices = self.parse_devices(r.text, 'OBJ_ACCESSDEV_ID', 'LAN')
+            self.statusmsg = 'OK'
+            return devices
+        except Exception as e:
+            self.statusmsg = 'Failed to get LAN devices: {0}'.format(e)
+            _LOGGER.error(self.statusmsg)
+            return []
+        
+
+    def get_wifi_devices(self):
+        """
+        Get the list of devices connected to the wifi
+        :return: list of devices
+        """
         # GET DEVICES RESPONSE
         try:
-            # r= self.session.get('http://10.0.0.1/?_type=menuData&_tag=wlan_homepage_lua.lua&InstNum=5&_={0}'.format(self.get_guid()), verify=False)
-            # self.log_request(r)
             r= self.session.get('http://{0}/?_type=menuView&_tag=localNetStatus&_={1}'.format(self.host, self.get_guid()),verify=False)
-            self.log_request(r)
-            # r= self.session.get('http://10.0.0.1/?_type=menuData&_tag=status_lan_info_lua.lua&_={0}'.format(self.get_guid()),verify=False)
-            # self.log_request(r)
-            # r= self.session.get('http://10.0.0.1/?_type=hiddenData&_tag=sntp_data&_={0}'.format(self.get_guid()),verify=False)
-            # self.log_request(r)
             r= self.session.get('http://{0}/?_type=menuData&_tag=wlan_client_stat_lua.lua&_={1}'.format(self.host, self.get_guid()),verify=False)
             self.log_request(r)
-            devices = self.parse_devices(r.text)
+            devices = self.parse_devices(r.text, 'OBJ_WLAN_AD_ID', 'WLAN')
             
             self.statusmsg = 'OK'
         except Exception as e:
-            _LOGGER.error('Failed to get Devices: {0}  rdev {2}'.format(e,  r.content))
-            self.statusmsg = "Failed to get Devices"
-            return False
+            self.statusmsg = 'Failed to get Devices: {0}  rdev {2}'.format(e,  r.content)
+            _LOGGER.error(self.statusmsg)
+            return []
+
         return devices
 
     def log_request(self, r):
@@ -147,14 +172,14 @@ class zteClient:
         _LOGGER.debug(r.text[0:200])
     
     # Parse xml response to get devices
-    def parse_devices(self, xml_response):
+    def parse_devices(self, xml_response, node_name='OBJ_WLAN_AD_ID', network_type='WLAN'):
         """Parse the xml response and return a list of devices."""
         devices = []
         xml = ET.fromstring(xml_response)
         assert xml.tag == 'ajax_response_xml_root', 'Unexpected response ' + xml_response
         
-        for device in xml.findall('OBJ_WLAN_AD_ID/Instance'):
-            device_info = {'Active': True, "IconType": None }
+        for device in xml.findall(f'{node_name}/Instance'):
+            device_info = {'Active': True, "IconType": None, "NetworkType": network_type }
             for i in range(0, int(len(device)/2)):
                 paramname = device[i*2].text
                 paramvalue = device[i*2+1].text

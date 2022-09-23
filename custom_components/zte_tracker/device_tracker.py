@@ -95,14 +95,14 @@ class zteDeviceScanner(DeviceScanner):
                 self.router_client.logout()
                 return devices
 
-            devices_json = self.router_client.get_devices_response()
+            device_list = self.router_client.get_devices_response()
         finally:
             self.router_client.logout()
 
-        self.hass.states.set(f"{DOMAIN}.scanning", devices_json != False)
+        self.hass.states.set(f"{DOMAIN}.scanning", device_list != False)
 
-        if devices_json != False:
-            for device in devices_json:
+        if device_list != False:
+            for device in device_list:
                 # _LOGGER.debug("Device: {0}".format(device))
                 icon = ICONS.get(device['IconType'], None)
                 dev = Device(

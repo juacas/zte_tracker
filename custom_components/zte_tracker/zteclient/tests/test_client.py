@@ -15,10 +15,11 @@ if res:
     i = 1
     for device in devices:
         if device.get('Active', False) == True:
-            name = device.get('name', 'Desconocido')
+            name = device.get('HostName', 'Desconocido')
+            mac = device.get('MACAddress', 'MAC??')
             if name is not None:
                 name = name.replace('未知设备', 'Desconocido')
-            print(f"{i}) {name}")
+            print(f"{i}) {mac} {name} {device.get('NetworkType')}")
             i+=1
 else:
     print("Error: {0}".format(client.statusmsg));
