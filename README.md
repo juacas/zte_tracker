@@ -7,6 +7,8 @@ Component to integrate the Huawei ZTE router (tested on model ZTE F6640).
 
 ## Example usage
 
+Place this fragment in configuration.yaml (adapting host, username and password) to your setup).
+
 ```
 # Setup the platform zte_tracker
 zte_tracker:
