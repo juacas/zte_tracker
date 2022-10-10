@@ -9,7 +9,6 @@ import xml.etree.ElementTree as ET
 
 
 _LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.DEBUG)
 
 class zteClient:
     def __init__(self, host, username, password):
@@ -20,7 +19,7 @@ class zteClient:
         self.password = password
         self.session = None
         self.login_data = None
-        self.status = 'off'
+        self.status = 'on'
         self.device_info = None
         self.guid = int(time.time()*1000)
 
@@ -44,7 +43,6 @@ class zteClient:
         Login procedure using ZTE challenge
         :return: true if the login has succeeded
         """
-     
         try:
             self.session = Session()
             self.session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.132 Safari/537.36'})

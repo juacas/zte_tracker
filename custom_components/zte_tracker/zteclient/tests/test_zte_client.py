@@ -1,3 +1,4 @@
+import logging
 import os
 from unittest import TestCase
 
@@ -6,6 +7,8 @@ from zteclient.zte_client import zteClient
 
 class TestzteClient(TestCase):
     def setUp(self) -> None:
+        _LOGGER = logging.getLogger(__name__)
+        _LOGGER.setLevel(logging.DEBUG)
         self.password = os.environ.get('TEST_PASSWORD', '!secret')
         self.host = os.environ.get('TEST_HOST', '192.168.3.1')
         self.client = zteClient(self.host, 'admin', self.password)

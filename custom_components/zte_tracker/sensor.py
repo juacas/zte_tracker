@@ -21,21 +21,23 @@ class zteSensor(Entity):
         self.hass = hass
         self._attr = {}
         self._state = None
+        self._unique_id = f"{DOMAIN}_sensor_main"
         self._name = DOMAIN
+        self.scanner = self.hass.data[DOMAIN].get("scanner")
 
     async def async_update(self):
         """Update the sensor."""
 
         # Check the data and update the value.
-        self._state = self.hass.data[DOMAIN].get("client").status
+        self._state = self.scanner.status
 
         # Set/update attributes
         self._attr = {
             'last_reboot': self.hass.data[DOMAIN].get("last_reboot", None),
-            'scanning': self.hass.data[DOMAIN].get("scanning", False),
-            'devices': self.hass.data[DOMAIN].get("devices", {}),
-            'num_devices': len(self.hass.data[DOMAIN].get("devices", {})),
-            'statusmsg': self.hass.data[DOMAIN].get("client").statusmsg
+            'scanning': self.scanner.scanning,
+            'devices': self.scanner.last_seen_devices,
+            'num_devices': len(self.scanner.last_seen_devices),
+            'statusmsg': self.scanner.statusmsg
         }
 
     @property

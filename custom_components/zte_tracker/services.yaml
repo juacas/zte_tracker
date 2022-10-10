@@ -1,2 +1,4 @@
 # reboot:
 #   description: Reboot the router.
+pause:
+  description: Pause and resume tracker (for allowing to administer the router).

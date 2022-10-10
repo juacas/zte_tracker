@@ -1,10 +1,16 @@
 """Constants for zte_tracker."""
 # Base component constants
+from unittest.mock import DEFAULT
+
+
 DOMAIN = "zte_tracker"
 DOMAIN_DATA = "{}_data".format(DOMAIN)
 VERSION = "0.4.1"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "device_tracker"]
 ISSUE_URL = "https://github.com/juacas/zte_tracker/issues"
+DEFAULT_HOST = '192.168.1.1'
+DEFAULT_USERNAME = 'admin'
+DEFAULT_PASSWORD = 'admin'
 
 STARTUP = """
 -------------------------------------------------------------------

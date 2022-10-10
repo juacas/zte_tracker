@@ -1,13 +1,16 @@
 """The ZTE component."""
 import logging
 from datetime import datetime
+from .device_tracker import zteDeviceScanner
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers import discovery
+from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
 from .zteclient.zte_client import zteClient
-from .const import DOMAIN
+from .const import DOMAIN, PLATFORMS
 
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
@@ -19,9 +22,6 @@ CONFIG_SCHEMA = vol.Schema({
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "device_tracker"]
-
-
 def setup(hass, config):
     """Set up is called when Home Assistant is loading our component."""
     plattform_conf = config.get(DOMAIN)
@@ -31,13 +31,13 @@ def setup(hass, config):
     client = zteClient(plattform_conf[CONF_HOST],
                            plattform_conf[CONF_USERNAME],
                            plattform_conf[CONF_PASSWORD])
+    scanner = zteDeviceScanner(hass, client)
+
     # Create DATA dict
     hass.data[DOMAIN] = {}
+    hass.data[DOMAIN]['scanner'] = scanner
     hass.data[DOMAIN]['client'] = client
     hass.data[DOMAIN]['last_reboot'] = None
-    hass.data[DOMAIN]['scanning'] = False
-    hass.data[DOMAIN]['statusmsg'] = 'OK'
-    hass.data[DOMAIN]['status'] = 'on'
 
     def handle_reboot(call):
         """Handle the service call."""
@@ -46,8 +46,20 @@ def setup(hass, config):
         hass.data[DOMAIN]["last_reboot"] = datetime.now()
         hass.states.set(f"{DOMAIN}.last_reboot", datetime.now())
         return True
+    def handle_pause(call):
+        """Handle the service call."""
+        _LOGGER.debug("Pause service called")
+        if scanner.status == 'on':
+            scanner.pause()    
+        else:
+            scanner.resume()
+        return True
 
     hass.services.register(DOMAIN, "reboot", handle_reboot)
+    _LOGGER.debug(f"Register {DOMAIN} service '{DOMAIN}.reboot'")
+    hass.services.register(DOMAIN, "pause", handle_pause)
+    _LOGGER.debug(f"Register {DOMAIN} service '{DOMAIN}.pause'")
+   
 
     # Load platforms
     for platform in PLATFORMS:
@@ -56,7 +68,5 @@ def setup(hass, config):
                 hass, platform, DOMAIN, plattform_conf, config
             )
         )
-
-    _LOGGER.debug(f"Register {DOMAIN} service '{DOMAIN}.reboot'")
     # Return boolean to indicate that initialization was successfully.
     return True

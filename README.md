@@ -3,7 +3,9 @@ Component to integrate the Huawei ZTE router (tested on model ZTE F6640).
 
 ## Features
 - Provides a device_tracker to monitor the connection status of devices in your Wifi and LAN ports.
-- TODO: Publish the zte.reboot service to reboot the router (not implemented yet).
+- Exposes the status of the scanner in "sensor.zte_tracker".
+- Exposes the service "zte_tracker.pause" to pause/resume the scanner because when the scanner is running the web-admin-console sessions are cancelled.
+- TODO: Publish the zte_tracker.reboot service to reboot the router (not implemented yet).
 
 ## Example usage
 

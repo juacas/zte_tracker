@@ -128,7 +128,7 @@ http://10.0.0.1/?_type=menuData&_tag=wlan_client_stat_lua.lua&_=1663483694859
       IF_LogOff=1
 
 ## REBOOT
-      TODO: Implement.
+      TODO: Implement. Need to create a encrypted request.
       
       POST 
       http://10.0.0.1/?_type=menuData&_tag=devmgr_restartmgr_lua.lua
