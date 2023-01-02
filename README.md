@@ -1,4 +1,4 @@
-# ZTE H288A Router Integration in Home Assistant
+# ZTE H288A Router Integration in Home Assistant (WORK IN PROGRESS)
 Component to integrate the ZTE H288A router as a device tracker in home assistant.
 
 ## Features
