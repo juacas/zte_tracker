@@ -8,7 +8,8 @@ Component to integrate the ZTE H288A router as a device tracker in home assistan
 
 ## Example usage
 
-Place this fragment in configuration.yaml (adapting host, username and password) to your setup).
+To use this integration, place the following snippet in configuration.yaml. Be sure to change host, username and zte_password accordingly.
+
 
 ```
 # Setup the platform zte_tracker
@@ -22,3 +23,6 @@ zte_tracker:
      new_device_defaults:
        track_new_devices: no
 ```
+
+
+For more information about the device_tracker parameters visit the official [Home Assistant Documentation](https://www.home-assistant.io/integrations/device_tracker/)
