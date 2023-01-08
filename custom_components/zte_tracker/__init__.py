@@ -5,7 +5,7 @@ from .device_tracker import zteDeviceScanner
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, CONF_DEVICE
 from homeassistant.helpers import discovery
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
@@ -17,6 +17,7 @@ CONFIG_SCHEMA = vol.Schema({
         vol.Optional(CONF_USERNAME): cv.string,
         vol.Optional(CONF_PASSWORD): cv.string,
         vol.Optional(CONF_PASSWORD): cv.string,
+        vol.Optional(CONF_DEVICE): cv.string,
     }, extra=vol.ALLOW_EXTRA),
 }, extra=vol.ALLOW_EXTRA)
 
@@ -26,11 +27,12 @@ def setup(hass, config):
     """Set up is called when Home Assistant is loading our component."""
     plattform_conf = config.get(DOMAIN)
     _LOGGER.debug("Client initialized with {0}:{1}@{2}".format(
-        plattform_conf[CONF_USERNAME], plattform_conf[CONF_PASSWORD], plattform_conf[CONF_HOST]))
+        plattform_conf[CONF_USERNAME], plattform_conf[CONF_PASSWORD], plattform_conf[CONF_HOST],plattform_conf[CONF_DEVICE]))
 
     client = zteClient(plattform_conf[CONF_HOST],
                            plattform_conf[CONF_USERNAME],
-                           plattform_conf[CONF_PASSWORD])
+                           plattform_conf[CONF_PASSWORD],
+                           plattform_conf[CONF_DEVICE])
     scanner = zteDeviceScanner(hass, client)
 
     # Create DATA dict
