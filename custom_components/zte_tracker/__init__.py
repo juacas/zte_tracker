@@ -26,8 +26,8 @@ _LOGGER = logging.getLogger(__name__)
 def setup(hass, config):
     """Set up is called when Home Assistant is loading our component."""
     plattform_conf = config.get(DOMAIN)
-    _LOGGER.debug("Client initialized with {0}:{1}@{2}".format(
-        plattform_conf[CONF_USERNAME], plattform_conf[CONF_PASSWORD], plattform_conf[CONF_HOST],plattform_conf[CONF_DEVICE]))
+    _LOGGER.debug("Client initialized for ZTE {0} @{1}".format(plattform_conf[CONF_DEVICE]
+        , plattform_conf[CONF_HOST]))
 
     client = zteClient(plattform_conf[CONF_HOST],
                            plattform_conf[CONF_USERNAME],
