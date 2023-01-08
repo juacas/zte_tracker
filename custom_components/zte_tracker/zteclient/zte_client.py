@@ -11,7 +11,7 @@ _LOGGER = logging.getLogger(__name__)
 accepted_devices = ['F6640', 'H288A']
 
 class zteClient:
-    def __init__(self, host, username, password,device):
+    def __init__(self, host, username, password,model):
         """Initialize the client."""
         self.statusmsg = None
         self.host = host
@@ -23,11 +23,13 @@ class zteClient:
         self.device_info = None
         self.guid = int(time.time()*1000)
 
-        if device in accepted_devices:
-            self.device = device
+        if model in accepted_devices:
+            self.model = model
         else:
-            self.device = 'F6640'
-        paths_file = open("/config/custom_components/zte_tracker/zteclient/routers/%s.txt" % device, "r")
+            _LOGGER.warning('Incompatible model {0}. Switching to default (F6640)'.format(model))
+            self.model = 'F6640'
+
+        paths_file = open("/config/custom_components/zte_tracker/zteclient/routers/%s.txt" % self.model, "r")
         self.paths = paths_file.read().splitlines()
         paths_file.close()
 
