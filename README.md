@@ -1,5 +1,5 @@
 # ZTE Router Integration for Home Assistant 
-Component to integrate ZTE routers as a device trackers in home assistant (Currently tested on models F6640 and H288A)
+Component to integrate some ZTE routers as a device trackers in home assistant.
 
 ## Features
 - Provides a device_tracker to monitor the connection status of devices in your Wifi and LAN ports.
@@ -7,12 +7,15 @@ Component to integrate ZTE routers as a device trackers in home assistant (Curre
 - Exposes the service "zte_tracker.pause" to pause/resume the scanner because when the scanner is running the web-admin-console sessions are cancelled.
 
 ## Compatible routers
-- ZTE F6640
-- ZTE H288A
+|   Name         | Model           | 
+| -------------  |:-------------:  | 
+| ZTE F6640      | F6640           |   
+| ZTE H288A      | H288A           | 
+| ZTE H169A      | H288A           |  
 
 This integration could work with more routers. Try one of the above and see if it work with yours.
 
-## Example usage
+## Installation
 
 To use this integration, place the following snippet in configuration.yaml. 
 
@@ -32,13 +35,13 @@ zte_tracker:
 ```
 Change the following parameters to match your configuration:
 
-`host`: Your router's local IP address (Usually 192.168.1.1)
+`host`: Your router's local IP address (Usually 192.168.1.1 or 192.168.0.1)
 
-`username`: Your router's username (Usually admin)
+`username`: Your router's login username (Usually admin)
 
-`password`: Your router's password 
+`password`: Your router's login password 
 
-`device`: Your router's model. Chose one from the [list above](#compatible-routers) (without the ZTE in front) 
+`device`: Your router's model. Chose one from the Model column of the [table above](#compatible-routers) 
 
 
 For more information about the device_tracker parameters visit the official [Home Assistant Documentation](https://www.home-assistant.io/integrations/device_tracker/)
