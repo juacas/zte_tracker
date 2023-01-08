@@ -12,12 +12,17 @@ from homeassistant.config_entries import ConfigEntry
 from .zteclient.zte_client import zteClient
 from .const import DOMAIN, PLATFORMS
 
+#Define models
+ACCEPTED_MODELS=['F6640','H288A']
+
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Optional(CONF_USERNAME): cv.string,
         vol.Optional(CONF_PASSWORD): cv.string,
         vol.Optional(CONF_PASSWORD): cv.string,
-        vol.Optional(CONF_MODEL): cv.string,
+        vol.Optional(CONF_MODEL): vol.In(
+            ACCEPTED_MODELS
+        ),
     }, extra=vol.ALLOW_EXTRA),
 }, extra=vol.ALLOW_EXTRA)
 

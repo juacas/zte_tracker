@@ -22,12 +22,7 @@ class zteClient:
         self.status = 'on'
         self.device_info = None
         self.guid = int(time.time()*1000)
-
-        if model in accepted_devices:
-            self.model = model
-        else:
-            _LOGGER.warning('Incompatible model {0}. Switching to default (F6640)'.format(model))
-            self.model = 'F6640'
+        self.model = model
 
         paths_file = open("/config/custom_components/zte_tracker/zteclient/routers/%s.txt" % self.model, "r")
         self.paths = paths_file.read().splitlines()
