@@ -152,9 +152,9 @@ class zteClient:
         # GET DEVICES RESPONSE
         try:
             r= self.session.get('http://{0}/?_type=menuView&_tag=localNetStatus&_={1}'.format(self.host, self.get_guid()),verify=False)
-            r= self.session.get('http://{0}/?_type=menuData&_tag=wlan_client_stat_lua.lua&_={1}'.format(self.host, self.get_guid()),verify=False)
+            r= self.session.get('http://{0}/?_type=menuData&_tag=accessdev_ssiddev_lua.lua&_={1}'.format(self.host, self.get_guid()),verify=False)
             self.log_request(r)
-            devices = self.parse_devices(r.text, 'OBJ_WLAN_AD_ID', 'WLAN')
+            devices = self.parse_devices(r.text, 'OBJ_ACCESSDEV_ID', 'WLAN')
             
             self.statusmsg = 'OK'
         except Exception as e:
