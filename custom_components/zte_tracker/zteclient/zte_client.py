@@ -8,7 +8,6 @@ from requests import Session
 import xml.etree.ElementTree as ET
 
 _LOGGER = logging.getLogger(__name__)
-accepted_devices = ['F6640', 'H288A']
 
 class zteClient:
     def __init__(self, host, username, password,model):
