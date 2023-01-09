@@ -7,11 +7,10 @@ import time
 from requests import Session
 import xml.etree.ElementTree as ET
 
-
 _LOGGER = logging.getLogger(__name__)
 
 class zteClient:
-    def __init__(self, host, username, password):
+    def __init__(self, host, username, password,model):
         """Initialize the client."""
         self.statusmsg = None
         self.host = host
@@ -22,6 +21,11 @@ class zteClient:
         self.status = 'on'
         self.device_info = None
         self.guid = int(time.time()*1000)
+        self.model = model
+
+        paths_file = open("/config/custom_components/zte_tracker/zteclient/routers/%s.txt" % self.model, "r")
+        self.paths = paths_file.read().splitlines()
+        paths_file.close()
 
     # REBOOT THE ROUTER
     def reboot(self) -> bool:
@@ -152,9 +156,9 @@ class zteClient:
         # GET DEVICES RESPONSE
         try:
             r= self.session.get('http://{0}/?_type=menuView&_tag=localNetStatus&_={1}'.format(self.host, self.get_guid()),verify=False)
-            r= self.session.get('http://{0}/?_type=menuData&_tag=wlan_client_stat_lua.lua&_={1}'.format(self.host, self.get_guid()),verify=False)
+            r= self.session.get('http://{0}/?_type=menuData&_tag={1}{2}'.format(self.host, self.paths[0],self.get_guid()),verify=False)
             self.log_request(r)
-            devices = self.parse_devices(r.text, 'OBJ_WLAN_AD_ID', 'WLAN')
+            devices = self.parse_devices(r.text, '{0}'.format(self.paths[1]), 'WLAN')
             
             self.statusmsg = 'OK'
         except Exception as e:
