@@ -137,7 +137,7 @@ class zteClient:
         # GET DEVICES RESPONSE from http://10.0.0.1/?_type=menuData&_tag=accessdev_homepage_lua.lua&InstNum=5&_=1663922344910
         try:
             r= self.session.get('http://{0}/?_type=menuView&_tag=localNetStatus&_={1}'.format(self.host, self.get_guid()),verify=False)
-            r= self.session.get('http://{0}/?_type=menuData&_tag=accessdev_landevs_lua.lua&InstNum=5&_{1}'.format(self.host, self.get_guid()),verify=False)
+            r= self.session.get('http://{0}/?_type=menuData&_tag=accessdev_landevs_lua.lua&_{1}'.format(self.host, self.get_guid()),verify=False)
             self.log_request(r)
             devices = self.parse_devices(r.text, 'OBJ_ACCESSDEV_ID', 'LAN')
             self.statusmsg = 'OK'

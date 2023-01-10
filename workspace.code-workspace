@@ -1,15 +1,11 @@
 {
 	"folders": [
 		{
-			"path": "custom_components/zte/zteclient"
+			"path": "."
 		},
 		{
-			"path": "."
+			"path": "custom_components/zte_tracker/zteclient"
 		}
 	],
-	"settings": {},
-	"launch": {
-		"version": "0.2.0",
-		"configurations": []
-	}
+	"settings": {}
 }
