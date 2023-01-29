@@ -33,7 +33,7 @@ class zteSensor(Entity):
         # Format list of devices.
         devices = []
         for device in self.scanner.last_results:
-            devices.append("{1} ({2}) - {3} - {0}".format(device.name, device.mac, device.ip, device.state))
+            devices.append("{1} ({2}) - {3} - {0}\n".format(device.name, device.mac, device.ip, device.state))
         # Set/update attributes
         self._attr = {
             'last_reboot': self.hass.data[DOMAIN].get("last_reboot", None),
