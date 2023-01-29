@@ -7,8 +7,9 @@ from zte_client import zteClient
 password = os.environ.get('TEST_PASSWORD', '!secret')
 host = os.environ.get('TEST_HOST', 'xx192.168.3.1')
 user = os.environ.get('TEST_USER', 'user')
+model = os.environ.get('TEST_MODEL', 'F6640')
 
-client = zteClient(host, user, password)
+client = zteClient(host, user, password, model)
 res = client.login()
 if res:
     devices = client.get_devices_response()

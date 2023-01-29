@@ -13,7 +13,7 @@ from .zteclient.zte_client import zteClient
 from .const import DOMAIN, PLATFORMS
 
 #Define models
-ACCEPTED_MODELS=['F6640','H288A']
+ACCEPTED_MODELS=['F6640','H288A', 'H196A']
 
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({

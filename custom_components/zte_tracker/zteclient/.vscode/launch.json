@@ -9,7 +9,8 @@
             "env": {
                 "TEST_USER": "user",
                 "TEST_PASSWORD": "usertest",
-                "TEST_HOST": "10.0.0.1"
+                "TEST_HOST": "10.0.0.1",
+                "TEST_MODEL": "F6640"
             },
             "justMyCode": true
         }

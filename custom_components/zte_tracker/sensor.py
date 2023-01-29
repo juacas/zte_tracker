@@ -35,8 +35,8 @@ class zteSensor(Entity):
         self._attr = {
             'last_reboot': self.hass.data[DOMAIN].get("last_reboot", None),
             'scanning': self.scanner.scanning,
-            'devices': self.scanner.last_seen_devices,
-            'num_devices': len(self.scanner.last_seen_devices),
+            'devices': self.scanner.last_results,
+            'num_devices': len(self.scanner.last_results),
             'statusmsg': self.scanner.statusmsg
         }
 

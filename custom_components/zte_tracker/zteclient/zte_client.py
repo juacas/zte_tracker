@@ -8,6 +8,21 @@ from requests import Session
 import xml.etree.ElementTree as ET
 
 _LOGGER = logging.getLogger(__name__)
+_MODELS = {
+    'F6640': {
+        'wlan_script': 'wlan_client_stat_lua.lua',
+        'wlan_id_element': 'OBJ_WLAN_AD_ID',
+        'lan_script': 'accessdev_landevs_lua.lua',
+        'lan_id_element': 'OBJ_ACCESSDEV_ID',
+    },
+    'H288A': {
+        'wlan_script': 'accessdev_ssiddev_lua.lua',
+        'wlan_id_element': 'OBJ_ACCESSDEV_ID',
+        'lan_script': 'accessdev_landevs_lua.lua',
+        'lan_id_element': 'OBJ_ACCESSDEV_ID'}
+}
+# Synonym for H288A
+_MODELS['H196A'] = _MODELS['H288A']
 
 class zteClient:
     def __init__(self, host, username, password,model):
@@ -22,10 +37,7 @@ class zteClient:
         self.device_info = None
         self.guid = int(time.time()*1000)
         self.model = model
-
-        paths_file = open("/config/custom_components/zte_tracker/zteclient/routers/%s.txt" % self.model, "r")
-        self.paths = paths_file.read().splitlines()
-        paths_file.close()
+        self.paths = _MODELS[model]
 
     # REBOOT THE ROUTER
     def reboot(self) -> bool:
@@ -137,9 +149,10 @@ class zteClient:
         # GET DEVICES RESPONSE from http://10.0.0.1/?_type=menuData&_tag=accessdev_homepage_lua.lua&InstNum=5&_=1663922344910
         try:
             r= self.session.get('http://{0}/?_type=menuView&_tag=localNetStatus&_={1}'.format(self.host, self.get_guid()),verify=False)
-            r= self.session.get('http://{0}/?_type=menuData&_tag=accessdev_landevs_lua.lua&_{1}'.format(self.host, self.get_guid()),verify=False)
+            lan_request = 'http://{0}/?_type=menuData&_tag={1}&_{2}'.format(self.host, self.paths['lan_script'], self.get_guid());
+            r= self.session.get(lan_request, verify=False)
             self.log_request(r)
-            devices = self.parse_devices(r.text, 'OBJ_ACCESSDEV_ID', 'LAN')
+            devices = self.parse_devices(r.text, self.paths['lan_id_element'], 'LAN')
             self.statusmsg = 'OK'
             return devices
         except Exception as e:
@@ -156,9 +169,10 @@ class zteClient:
         # GET DEVICES RESPONSE
         try:
             r= self.session.get('http://{0}/?_type=menuView&_tag=localNetStatus&_={1}'.format(self.host, self.get_guid()),verify=False)
-            r= self.session.get('http://{0}/?_type=menuData&_tag={1}{2}'.format(self.host, self.paths[0],self.get_guid()),verify=False)
+            wlan_request = 'http://{0}/?_type=menuData&_tag={1}&_={2}'.format(self.host, self.paths['wlan_script'],self.get_guid())
+            r= self.session.get(wlan_request,verify=False)
             self.log_request(r)
-            devices = self.parse_devices(r.text, '{0}'.format(self.paths[1]), 'WLAN')
+            devices = self.parse_devices(r.text, self.paths['wlan_id_element'], 'WLAN')
             
             self.statusmsg = 'OK'
         except Exception as e:

@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "custom_components/zte_tracker/zteclient"
+		}
+	],
+	"settings": {}
+}
