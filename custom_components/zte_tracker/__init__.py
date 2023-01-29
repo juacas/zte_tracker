@@ -5,18 +5,24 @@ from .device_tracker import zteDeviceScanner
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, CONF_MODEL
 from homeassistant.helpers import discovery
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from .zteclient.zte_client import zteClient
 from .const import DOMAIN, PLATFORMS
 
+#Define models
+ACCEPTED_MODELS=['F6640','H288A']
+
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Optional(CONF_USERNAME): cv.string,
         vol.Optional(CONF_PASSWORD): cv.string,
         vol.Optional(CONF_PASSWORD): cv.string,
+        vol.Optional(CONF_MODEL): vol.In(
+            ACCEPTED_MODELS
+        ),
     }, extra=vol.ALLOW_EXTRA),
 }, extra=vol.ALLOW_EXTRA)
 
@@ -25,12 +31,13 @@ _LOGGER = logging.getLogger(__name__)
 def setup(hass, config):
     """Set up is called when Home Assistant is loading our component."""
     plattform_conf = config.get(DOMAIN)
-    _LOGGER.debug("Client initialized with {0}:{1}@{2}".format(
-        plattform_conf[CONF_USERNAME], plattform_conf[CONF_PASSWORD], plattform_conf[CONF_HOST]))
+    _LOGGER.debug("Client initialized for ZTE {0} @{1}".format(plattform_conf[CONF_MODEL]
+        , plattform_conf[CONF_HOST]))
 
     client = zteClient(plattform_conf[CONF_HOST],
                            plattform_conf[CONF_USERNAME],
-                           plattform_conf[CONF_PASSWORD])
+                           plattform_conf[CONF_PASSWORD],
+                           plattform_conf[CONF_MODEL])
     scanner = zteDeviceScanner(hass, client)
 
     # Create DATA dict
