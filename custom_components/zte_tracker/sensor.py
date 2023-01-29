@@ -30,12 +30,15 @@ class zteSensor(Entity):
 
         # Check the data and update the value.
         self._state = self.scanner.status
-
+        # Format list of devices.
+        devices = []
+        for device in self.scanner.last_results:
+            devices.append("{1} ({2}) - {3} - {0}".format(device.get("HostName"), device.get("MacAddress"), device.get("IPAddress"), device.get("State")))
         # Set/update attributes
         self._attr = {
             'last_reboot': self.hass.data[DOMAIN].get("last_reboot", None),
             'scanning': self.scanner.scanning,
-            'devices': self.scanner.last_results,
+            'devices': devices,
             'num_devices': len(self.scanner.last_results),
             'statusmsg': self.scanner.statusmsg
         }
