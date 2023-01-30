@@ -4,7 +4,7 @@
   "documentation": "https://raw.githubusercontent.com/juacas/zte_tracker/master/README.md",
   "codeowners": ["@juacas"],
   "issue_tracker": "https://github.com/juacas/zte_tracker/issues",
-  "version": "v1.3.0-beta3",
+  "version": "v1.3.0",
   "requirements": [],
   "iot_class": "local_polling"
 }

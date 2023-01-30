@@ -24,7 +24,7 @@ To use this integration, place the following snippet in configuration.yaml.
 # Setup the platform zte_tracker
 zte_tracker:
      host: 192.168.1.1
-     device: F6640
+     model: F6640
      username: user
      password: !secret zte_password
      interval_seconds: 60
@@ -41,10 +41,13 @@ Change the following parameters to match your configuration:
 
 `password`: Your router's login password 
 
-`device`: Your router's model. Chose one from the Model column of the [table above](#compatible-routers) 
+`model`: Your router's model. Chose one from the Model column of the [table above](#compatible-routers) 
 
 
 For more information about the device_tracker parameters visit the official [Home Assistant Documentation](https://www.home-assistant.io/integrations/device_tracker/)
 
+## Contributors
+
+- Thanks to @gselivanof for H288A, H169A models.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
