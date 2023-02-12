@@ -111,7 +111,7 @@ class zteDeviceScanner(DeviceScanner):
             elif not self.router_client.login():
                 self.statusmsg = self.router_client.statusmsg
                 self.scanning = False
-                _LOGGER.warning("Login failed: {0}@{2}".format(self.router_client.username, self.router_client.host))
+                _LOGGER.warning("Login failed: {0}@{1}".format(self.router_client.username, self.router_client.host))
                 self.router_client.logout()
                 return []
             # Get the devices from the router.
