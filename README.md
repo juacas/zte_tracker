@@ -7,11 +7,13 @@ Component to integrate some ZTE routers as a device trackers in home assistant.
 - Exposes the service "zte_tracker.pause" to pause/resume the scanner because when the scanner is running the web-admin-console sessions are cancelled.
 
 ## Compatible routers
-|   Name         | Model           | 
+|   Name         | Model Param     | 
 | -------------  |:-------------:  | 
 | ZTE F6640      | F6640           |   
 | ZTE H288A      | H288A           | 
-| ZTE H169A      | H169A           |  
+| ZTE H169A      | H169A           |
+| ZTE H388X      | H388X           |  
+
 
 This integration could work with more routers. Try one of the above and see if it work with yours.
 
@@ -48,6 +50,6 @@ For more information about the device_tracker parameters visit the official [Hom
 
 ## Contributors
 
-- Thanks to @gselivanof for H288A, H169A models.
+- Thanks to @gselivanof for H288A, H169A models support, @TrinTragula for H388X verification.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)

@@ -21,8 +21,10 @@ _MODELS = {
         'lan_script': 'accessdev_landevs_lua.lua',
         'lan_id_element': 'OBJ_ACCESSDEV_ID'}
 }
-# Synonym for H288A
+# Synonym H196A is like H288A
 _MODELS['H196A'] = _MODELS['H288A']
+# Synonym H388X is like  H288A
+_MODELS['H388X'] = _MODELS['H288A']
 
 class zteClient:
     def __init__(self, host, username, password,model):
