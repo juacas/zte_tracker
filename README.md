@@ -13,6 +13,7 @@ Component to integrate some ZTE routers as a device trackers in home assistant.
 | ZTE H288A      | H288A           | 
 | ZTE H169A      | H169A           |
 | ZTE H388X      | H388X           |  
+| ZTE H2640      | H2640           |  
 
 
 This integration could work with more routers. Try one of the above and see if it work with yours.
