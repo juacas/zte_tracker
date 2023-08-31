@@ -9,6 +9,11 @@ host = os.environ.get('TEST_HOST', 'xx192.168.3.1')
 user = os.environ.get('TEST_USER', 'user')
 model = os.environ.get('TEST_MODEL', 'F6640')
 
+# Check zteClient.get_models() returns a list.
+
+models = zteClient.get_models()
+print(models)
+
 client = zteClient(host, user, password, model)
 res = client.login()
 if res:
