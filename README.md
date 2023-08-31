@@ -1,4 +1,4 @@
-![GitHub](https://img.shields.io/github/license/juacas/zte)
+![GitHub](https://img.shields.io/github/license/juacas/zte_tracker)
 ![GitHub Repo stars](https://img.shields.io/github/stars/juacas/zte_tracker)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/juacas/zte_tracker)
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
