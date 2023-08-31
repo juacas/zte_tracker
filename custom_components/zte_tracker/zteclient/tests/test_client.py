@@ -11,7 +11,7 @@ model = os.environ.get('TEST_MODEL', 'F6640')
 
 # Check zteClient.get_models() returns a list.
 
-models = zteClient.get_models()
+models = zteClient.get_models(None)
 print(models)
 
 client = zteClient(host, user, password, model)

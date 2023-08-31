@@ -10,7 +10,6 @@
             "request": "launch",
             "program": "tests/test_client.py",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}/custom_components/zte_tracker/zteclient",
             "env": {
                 "TEST_PASSWORD": "testpass",
                 "TEST_USERNAME": "user",

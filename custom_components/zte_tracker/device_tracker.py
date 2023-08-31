@@ -38,9 +38,10 @@ class zteDeviceScanner(DeviceScanner):
         """Initialize the scanner.
         :type cli: zteClient
         """
-        _LOGGER.info("===================================================================")
-        _LOGGER.info(" ZTE_tracker start device Scanner for model {0}".format(cli.model))
+        _LOGGER.info("===============================================================================================")
+        _LOGGER.info(" ZTE_tracker start device Scanner for model for model {0}".format(cli.model))
         _LOGGER.info(" Supported models: {0}".format(cli.get_models()))
+        _LOGGER.info("============================ Supported models: {0}".format(cli.get_models()))
         _LOGGER.info("===================================================================")
         self.router_client = cli
         self.hass = hass
