@@ -12,17 +12,12 @@ from homeassistant.config_entries import ConfigEntry
 from .zteclient.zte_client import zteClient
 from .const import DOMAIN, PLATFORMS
 
-#Define models
-ACCEPTED_MODELS=['F6640','H288A', 'H196A', 'H388X', 'H2640']
-
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Optional(CONF_USERNAME): cv.string,
         vol.Optional(CONF_PASSWORD): cv.string,
         vol.Optional(CONF_PASSWORD): cv.string,
-        vol.Optional(CONF_MODEL): vol.In(
-            ACCEPTED_MODELS
-        ),
+        vol.Optional(CONF_MODEL): vol.In(zteClient.get_models(None)),
     }, extra=vol.ALLOW_EXTRA),
 }, extra=vol.ALLOW_EXTRA)
 
@@ -57,7 +52,7 @@ def setup(hass, config):
         """Handle the service call."""
         _LOGGER.debug("Pause service called")
         if scanner.status == 'on':
-            scanner.pause()    
+            scanner.pause()
         else:
             scanner.resume()
         return True
@@ -66,7 +61,7 @@ def setup(hass, config):
     _LOGGER.debug(f"Register {DOMAIN} service '{DOMAIN}.reboot'")
     hass.services.register(DOMAIN, "pause", handle_pause)
     _LOGGER.debug(f"Register {DOMAIN} service '{DOMAIN}.pause'")
-   
+
 
     # Load platforms
     for platform in PLATFORMS:

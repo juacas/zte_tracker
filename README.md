@@ -1,4 +1,19 @@
-# ZTE Router Integration for Home Assistant 
+![GitHub](https://img.shields.io/github/license/juacas/zte)
+![GitHub Repo stars](https://img.shields.io/github/stars/juacas/zte_tracker)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/juacas/zte_tracker)
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
+<!-- ![Pytest](https://github.com/juacas/zte_tracker/workflows/Pytest/badge.svg?branch=master)
+![CodeQL](https://github.com/juacas/zte_tracker/workflows/CodeQL/badge.svg?branch=master) -->
+![Validate with hassfest](https://github.com/juacas/zte_tracker/workflows/Validate%20with%20hassfest/badge.svg?branch=master)
+
+![GitHub contributors](https://img.shields.io/github/contributors/juacas/zte_tracker)
+![Maintenance](https://img.shields.io/maintenance/yes/2023)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/y/juacas/zte_tracker)
+![GitHub commits since tagged version](https://img.shields.io/github/commits-since/juacas/zte_tracker/v1.0.0)
+![GitHub last commit](https://img.shields.io/github/last-commit/juacas/zte_tracker)
+<!-- ![Codecov branch](https://img.shields.io/codecov/c/github/juacas/zte_tracker/master) -->
+
+# ZTE Router Integration for Home Assistant
 Component to integrate some ZTE routers as a device trackers in home assistant.
 
 ## Features
@@ -7,20 +22,20 @@ Component to integrate some ZTE routers as a device trackers in home assistant.
 - Exposes the service "zte_tracker.pause" to pause/resume the scanner because when the scanner is running the web-admin-console sessions are cancelled.
 
 ## Compatible routers
-|   Name         | Model Param     | 
-| -------------  |:-------------:  | 
-| ZTE F6640      | F6640           |   
-| ZTE H288A      | H288A           | 
+|   Name         | Model Param     |
+| -------------  |:-------------:  |
+| ZTE F6640      | F6640           |
+| ZTE H288A      | H288A           |
 | ZTE H169A      | H169A           |
-| ZTE H388X      | H388X           |  
-| ZTE H2640      | H2640           |  
+| ZTE H388X      | H388X           |
+| ZTE H2640      | H2640           |
 
 
 This integration could work with more routers. Try one of the above and see if it work with yours.
 
 ## Installation
 
-To use this integration, place the following snippet in configuration.yaml. 
+To use this integration, place the following snippet in configuration.yaml.
 
 
 ```
@@ -42,15 +57,13 @@ Change the following parameters to match your configuration:
 
 `username`: Your router's login username (Usually admin)
 
-`password`: Your router's login password 
+`password`: Your router's login password
 
-`model`: Your router's model. Chose one from the Model column of the [table above](#compatible-routers) 
+`model`: Your router's model. Chose one from the Model column of the [table above](#compatible-routers)
 
 
 For more information about the device_tracker parameters visit the official [Home Assistant Documentation](https://www.home-assistant.io/integrations/device_tracker/)
 
 ## Contributors
 
-- Thanks to @gselivanof for H288A, H169A models support, @TrinTragula for H388X verification.
-
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
+- Thanks to @gselivanof for H288A, H169A models support, @TrinTragula for H388X verification, @kvshino for H2640 verification.

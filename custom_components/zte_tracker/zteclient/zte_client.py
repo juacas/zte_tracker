@@ -43,6 +43,10 @@ class zteClient:
         self.model = model
         self.paths = _MODELS[model]
 
+    # Retuns the list of supported model keys.
+    def get_models(self) -> list:
+        return list(_MODELS.keys())
+
     # REBOOT THE ROUTER
     def reboot(self) -> bool:
         if not self.login:
@@ -71,7 +75,7 @@ class zteClient:
 
             # Step1: Get session token.
             session_token = self.get_session_token()
-           
+
             # Step2: query for login token.
             r = self.session.get('http://{0}/?_type=loginData&_tag=login_token&_={1}'.format(self.host, self.get_guid() ), verify=False)
             self.log_request(r)
@@ -80,7 +84,7 @@ class zteClient:
             assert xml_response.tag == 'ajax_response_xml_root', 'Unexpected response ' + xml_response.text
             login_token = xml_response.text
             assert login_token, 'Empty login_token'
-     
+
             # Step3: Login entry
             pass_hash = self.password + login_token
             password_param = hashlib.sha256(pass_hash.encode()).hexdigest()
@@ -95,7 +99,7 @@ class zteClient:
                 # r = self.session.get('http://{0}/'.format(self.host), verify=False)
                 # self.log_request(r)
             self.statusmsg = None
-          
+
             return True
         except Exception as e:
             self.statusmsg = 'Failed login: {0}'.format(e)
@@ -123,11 +127,11 @@ class zteClient:
         try:
             if self.login_data is None:
                 return False
-    
+
             r = self.session.post('http://{0}?_type=loginData&_tag=logout_entry'.format(self.host),
                      data={'IF_LogOff':'1'}, verify=False)
             self.log_request(r)
-            
+
             assert r.ok, r
             _LOGGER.debug("Logged out")
         except Exception as e:
@@ -163,7 +167,7 @@ class zteClient:
             self.statusmsg = 'Failed to get LAN devices: {0}'.format(e)
             _LOGGER.error(self.statusmsg)
             return []
-        
+
 
     def get_wifi_devices(self):
         """
@@ -177,7 +181,7 @@ class zteClient:
             r= self.session.get(wlan_request,verify=False)
             self.log_request(r)
             devices = self.parse_devices(r.text, self.paths['wlan_id_element'], 'WLAN')
-            
+
             self.statusmsg = 'OK'
         except Exception as e:
             self.statusmsg = 'Failed to get Devices: {0}  rdev {2}'.format(e,  r.content)
@@ -190,14 +194,14 @@ class zteClient:
         _LOGGER.debug(r.request.url)
         _LOGGER.debug(r.request.headers)
         _LOGGER.debug(r.text[0:200])
-    
+
     # Parse xml response to get devices
     def parse_devices(self, xml_response, node_name='OBJ_WLAN_AD_ID', network_type='WLAN'):
         """Parse the xml response and return a list of devices."""
         devices = []
         xml = ET.fromstring(xml_response)
         assert xml.tag == 'ajax_response_xml_root', 'Unexpected response ' + xml_response
-        
+
         for device in xml.findall(f'{node_name}/Instance'):
             device_info = {'Active': True, "IconType": None, "NetworkType": network_type }
             for i in range(0, int(len(device)/2)):

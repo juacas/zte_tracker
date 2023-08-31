@@ -6,5 +6,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/juacas/zte_tracker/issues",
   "requirements": [],
-  "version": "v1.3.3"
+  "version": "v1.3.4"
 }
