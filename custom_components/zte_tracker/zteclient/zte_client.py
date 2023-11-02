@@ -21,8 +21,8 @@ _MODELS = {
         'lan_script': 'accessdev_landevs_lua.lua',
         'lan_id_element': 'OBJ_ACCESSDEV_ID'}
 }
-# Synonym H196A is like H288A
-_MODELS['H196A'] = _MODELS['H288A']
+# Synonym H169A is like H288A
+_MODELS['H169A'] = _MODELS['H288A']
 # Synonym H388X is like  H288A
 _MODELS['H388X'] = _MODELS['H288A']
 # Synonym H2640 is like H388X
