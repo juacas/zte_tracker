@@ -26,6 +26,7 @@ Component to integrate some ZTE routers as a device trackers in home assistant.
 |   Name         | Model Param     |
 | -------------  |:-------------:  |
 | ZTE F6640      | F6640           |
+| ZTE F6645P     | F6640P          |
 | ZTE H288A      | H288A           |
 | ZTE H169A      | H169A           |
 | ZTE H388X      | H388X           |
@@ -67,4 +68,4 @@ For more information about the device_tracker parameters visit the official [Hom
 
 ## Contributors
 
-- Thanks to @gselivanof for H288A, H169A models support, @TrinTragula for H388X verification, @kvshino for H2640 verification.
+- Thanks to @gselivanof for H288A, H169A models support, @TrinTragula for H388X verification, @kvshino for H2640 verification, @dapuzz for G6645P verification.
