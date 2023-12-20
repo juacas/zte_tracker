@@ -29,6 +29,8 @@ _MODELS['H388X'] = _MODELS['H288A']
 _MODELS['H2640'] = _MODELS['H288A']
 # Synonym F6645P is like F6640
 _MODELS['F6645P'] = _MODELS['F6640']
+# Synonym H3600P is like H288A
+_MODELS['H3600P'] = _MODELS['H288A']
 class zteClient:
     def __init__(self, host, username, password,model):
         """Initialize the client."""
