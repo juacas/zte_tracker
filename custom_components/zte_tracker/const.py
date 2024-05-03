@@ -5,7 +5,7 @@ from unittest.mock import DEFAULT
 
 DOMAIN = "zte_tracker"
 DOMAIN_DATA = "{}_data".format(DOMAIN)
-VERSION = "1.3.7"
+VERSION = "1.3.9"
 PLATFORMS = ["sensor", "device_tracker"]
 ISSUE_URL = "https://github.com/juacas/zte_tracker/issues"
 DEFAULT_HOST = '192.168.1.1'
