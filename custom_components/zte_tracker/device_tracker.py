@@ -110,7 +110,6 @@ class zteDeviceScanner(DeviceScanner):
                 self.scanning = False
                 return []
             elif not self.router_client.login():
-                self.statusmsg = self.router_client.statusmsg
                 self.scanning = False
                 _LOGGER.warning("Login failed: {0}@{1}".format(self.router_client.username, self.router_client.host))
                 self.router_client.logout()
@@ -120,6 +119,7 @@ class zteDeviceScanner(DeviceScanner):
         finally:
             self.router_client.logout()
 
+        self.statusmsg = self.router_client.statusmsg
         self.scanning = True
 
         # Create a list of Device tuples.

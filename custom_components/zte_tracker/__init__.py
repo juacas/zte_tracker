@@ -23,7 +23,7 @@ CONFIG_SCHEMA = vol.Schema({
 
 _LOGGER = logging.getLogger(__name__)
 
-def setup(hass, config):
+def setup(hass: HomeAssistant, config: ConfigEntry):
     """Set up is called when Home Assistant is loading our component."""
     plattform_conf = config.get(DOMAIN)
     _LOGGER.debug("Client initialized for ZTE {0} @{1}".format(plattform_conf[CONF_MODEL]
@@ -65,7 +65,7 @@ def setup(hass, config):
 
     # Load platforms
     for platform in PLATFORMS:
-        hass.async_create_task(
+        hass.create_task(
             discovery.async_load_platform(
                 hass, platform, DOMAIN, plattform_conf, config
             )

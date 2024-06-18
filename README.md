@@ -7,7 +7,7 @@
 ![Validate with hassfest](https://github.com/juacas/zte_tracker/workflows/Validate%20with%20hassfest/badge.svg?branch=master)
 
 ![GitHub contributors](https://img.shields.io/github/contributors/juacas/zte_tracker)
-![Maintenance](https://img.shields.io/maintenance/yes/2023)
+![Maintenance](https://img.shields.io/maintenance/yes/2025)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/juacas/zte_tracker)
 ![GitHub commits since tagged version](https://img.shields.io/github/commits-since/juacas/zte_tracker/v1.0.0)
 ![GitHub last commit](https://img.shields.io/github/last-commit/juacas/zte_tracker)
@@ -32,11 +32,11 @@ Component to integrate some ZTE routers as a device trackers in home assistant.
 | ZTE H288A      | H288A           |
 | ZTE H388X      | H388X           |
 | ZTE H3600P     | H3600P          |
-| ZTE H6645P V2  | H6645P          |
 | ZTE H3640 V10  | H3640           |
+| ZTE H6645P V2  | H6645P          |
 
 
-This integration could work with more routers. Try one of the above and see if it work with yours.
+This integration could work with more routers. Try one of the above and see if it works with yours.
 
 ## Installation
 
