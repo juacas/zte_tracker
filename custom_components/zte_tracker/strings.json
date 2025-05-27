@@ -1,0 +1,9 @@
+{
+    "title": "ZTE Tracker",
+    "services": {
+        "pause": {
+            "name": "Pause and resume tracker",
+            "description": "Pause and resume tracker (for allowing to administer the router). Toggle status."
+        }
+    }
+}
