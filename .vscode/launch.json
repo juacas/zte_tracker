@@ -1,19 +1,75 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Test Client",
+            "name": "Home Assistant",
             "type": "python",
             "request": "launch",
-            "program": "tests/test_client.py",
+            "program": "/usr/src/homeassistant/homeassistant/__main__.py",
+            "args": [
+                "--config",
+                "/config"
+            ],
             "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "/usr/src/homeassistant:/config/custom_components"
+            }
+        },
+        {
+            "name": "Home Assistant (Skip Dependencies)",
+            "type": "python",
+            "request": "launch",
+            "program": "/usr/src/homeassistant/homeassistant/__main__.py",
+            "args": [
+                "--config",
+                "/config",
+                "--skip-pip"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "/usr/src/homeassistant:/config/custom_components"
+            }
+        },
+        {
+            "name": "Python: Test ZTE Tracker",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/test_client.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
             "env": {
                 "TEST_PASSWORD": "testpass",
                 "TEST_USERNAME": "user",
                 "TEST_HOST": "localhost",
+                "PYTHONPATH": "${workspaceFolder}/custom_components"
+            }
+        },
+        {
+            "name": "Python: Run Tests",
+            "type": "python",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "${workspaceFolder}/tests",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/custom_components"
+            }
+        },
+        {
+            "name": "Python: Debug Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/custom_components"
             }
         }
     ]

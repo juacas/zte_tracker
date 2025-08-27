@@ -1,31 +1,90 @@
-// See https://aka.ms/vscode-remote/devcontainer.json for format details.
 {
-	"image": "ludeeus/container:integration-debian",
-	"name": "ZTE Tracker development",
+	"name": "ZTE Tracker Home Assistant Development",
+	"image": "ghcr.io/home-assistant/devcontainer:addons",
 	"context": "..",
 	"appPort": [
-		"9123:8123",
+		"8123:8123",
 		"5678:5678"
 	],
-	"postCreateCommand": "container install",
-	"extensions": [
-		"ms-python.python",
-		"github.vscode-pull-request-github",
-		"ryanluker.vscode-coverage-gutters",
-		"ms-python.vscode-pylance"
+	"postCreateCommand": "bash devcontainer_bootstrap",
+	"forwardPorts": [8123, 5678],
+	"portsAttributes": {
+		"8123": {
+			"label": "Home Assistant",
+			"onAutoForward": "openBrowser"
+		},
+		"5678": {
+			"label": "Python Debugger"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"ms-python.black-formatter",
+				"ms-python.isort",
+				"ms-python.flake8",
+				"github.vscode-pull-request-github",
+				"ryanluker.vscode-coverage-gutters",
+				"ms-vscode.vscode-json",
+				"redhat.vscode-yaml",
+				"esbenp.prettier-vscode",
+				"bradlc.vscode-tailwindcss",
+				"ms-vscode.test-adapter-converter",
+				"littlefoxteam.vscode-python-test-adapter"
+			],
+			"settings": {
+				"files.eol": "\n",
+				"files.trimTrailingWhitespace": true,
+				"editor.tabSize": 4,
+				"editor.insertSpaces": true,
+				"editor.formatOnSave": true,
+				"editor.formatOnPaste": false,
+				"editor.formatOnType": false,
+				"editor.codeActionsOnSave": {
+					"source.organizeImports": "explicit"
+				},
+				"python.defaultInterpreterPath": "/usr/local/bin/python",
+				"python.analysis.autoSearchPaths": false,
+				"python.analysis.autoImportCompletions": true,
+				"python.analysis.typeCheckingMode": "basic",
+				"python.testing.pytestEnabled": true,
+				"python.testing.unittestEnabled": false,
+				"python.testing.pytestArgs": [
+					"tests"
+				],
+				"[python]": {
+					"editor.defaultFormatter": "ms-python.black-formatter",
+					"editor.codeActionsOnSave": {
+						"source.organizeImports": "explicit"
+					}
+				},
+				"[yaml]": {
+					"editor.defaultFormatter": "redhat.vscode-yaml",
+					"editor.insertSpaces": true,
+					"editor.tabSize": 2
+				},
+				"[json]": {
+					"editor.defaultFormatter": "esbenp.prettier-vscode"
+				},
+				"yaml.schemas": {
+					"https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/helpers/config_validation.py": [
+						"configuration.yaml",
+						"*.yaml"
+					]
+				},
+				"files.associations": {
+					"*.yaml": "yaml",
+					"*.yml": "yaml"
+				}
+			}
+		}
+	},
+	"mounts": [
+		"source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
 	],
-	"settings": {
-		"files.eol": "\n",
-		"editor.tabSize": 4,
-		"terminal.integrated.shell.linux": "/bin/bash",
-		"python.pythonPath": "/usr/bin/python3",
-		"python.analysis.autoSearchPaths": false,
-		"python.linting.pylintEnabled": true,
-		"python.linting.enabled": true,
-		"python.formatting.provider": "black",
-		"editor.formatOnPaste": false,
-		"editor.formatOnSave": true,
-		"editor.formatOnType": true,
-		"files.trimTrailingWhitespace": true
-	}
+	"runArgs": [
+		"--privileged"
+	]
 }
