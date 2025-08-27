@@ -218,70 +218,93 @@ class zteClient:
                 self.session = None
             self.login_data = None
 
-    def get_devices_response(self):
-        """
-        Get the list of devices
-        """
-        lan_devices = self.get_lan_devices()
-        wifi_devices = self.get_wifi_devices()
-        devices = wifi_devices + lan_devices
-        return devices
-
-    def get_lan_devices(self):
-        """
-        Get the list of devices connected to the LAN ports
-        :return: list of devices
-        """
-        # GET DEVICES RESPONSE from http://10.0.0.1/?_type=menuData&_tag=accessdev_homepage_lua.lua&InstNum=5&_=1663922344910
+    def get_devices_response(self) -> list[dict[str, Any]] | None:
+        """Get the list of devices with connection reuse optimization."""
         try:
+            # Combine LAN and WiFi requests for efficiency
+            lan_devices = self.get_lan_devices()
+            wifi_devices = self.get_wifi_devices() 
+            
+            if lan_devices is None and wifi_devices is None:
+                return None
+                
+            # Combine results, handling None cases
+            devices = []
+            if lan_devices:
+                devices.extend(lan_devices)
+            if wifi_devices:
+                devices.extend(wifi_devices)
+                
+            return devices
+            
+        except Exception as e:
+            _LOGGER.error("Error getting device response: %s", e)
+            return None
+
+    def get_lan_devices(self) -> list[dict[str, Any]] | None:
+        """Get the list of devices connected to the LAN ports."""
+        try:
+            if not self.session:
+                raise RuntimeError("Session not initialized")
+                
+            # First request to set up context
             r = self.session.get(
-                "http://{0}/?_type=menuView&_tag=localNetStatus&_={1}".format(
-                    self.host, self.get_guid()
-                ),
-                verify=True,  # Enable SSL verification
-                timeout=10,   # Add timeout
+                f"http://{self.host}/?_type=menuView&_tag=localNetStatus&_={self.get_guid()}",
+                verify=self.verify_ssl,
+                timeout=10,
             )
-            lan_request = "http://{0}/?_type=menuData&_tag={1}&_{2}".format(
-                self.host, self.paths["lan_script"], self.get_guid()
-            )
-            r = self.session.get(lan_request, verify=True, timeout=10)
+            r.raise_for_status()
+            
+            # Main request for LAN devices
+            lan_request = f"http://{self.host}/?_type=menuData&_tag={self.paths['lan_script']}&_{self.get_guid()}"
+            r = self.session.get(lan_request, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            
             self.log_request(r)
             devices = self.parse_devices(r.text, self.paths["lan_id_element"], "LAN")
             self.statusmsg = "OK"
             return devices
+            
         except Exception as e:
-            self.statusmsg = "Failed to get LAN devices: {0}".format(e)
+            self.statusmsg = f"Failed to get LAN devices: {e}"
             _LOGGER.error(self.statusmsg)
-            return []
+            return None
 
-    def get_wifi_devices(self):
-        """
-        Get the list of devices connected to the wifi
-        :return: list of devices
-        """
-        # GET DEVICES RESPONSE
+    def get_wifi_devices(self) -> list[dict[str, Any]] | None:
+        """Get the list of devices connected to the wifi."""
         try:
-            r = self.session.get(
-                "http://{0}/?_type=menuView&_tag=localNetStatus&_={1}".format(
-                    self.host, self.get_guid()
-                ),
-                verify=True,  # Enable SSL verification
-                timeout=10,   # Add timeout
-            )
-            wlan_request = "http://{0}/?_type=menuData&_tag={1}&_={2}".format(
-                self.host, self.paths["wlan_script"], self.get_guid()
-            )
-            r = self.session.get(wlan_request, verify=True, timeout=10)
+            if not self.session:
+                raise RuntimeError("Session not initialized")
+                
+            # Since we might have already called the menu view for LAN, 
+            # we can try to skip it for efficiency, but keep it for safety
+            try:
+                # Try direct request first
+                wlan_request = f"http://{self.host}/?_type=menuData&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
+                r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
+                r.raise_for_status()
+            except Exception:
+                # Fallback to full setup if direct request fails
+                r = self.session.get(
+                    f"http://{self.host}/?_type=menuView&_tag=localNetStatus&_={self.get_guid()}",
+                    verify=self.verify_ssl,
+                    timeout=10,
+                )
+                r.raise_for_status()
+                
+                wlan_request = f"http://{self.host}/?_type=menuData&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
+                r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
+                r.raise_for_status()
+
             self.log_request(r)
             devices = self.parse_devices(r.text, self.paths["wlan_id_element"], "WLAN")
-
             self.statusmsg = "OK"
+            return devices
+            
         except Exception as e:
-            self.statusmsg = "Failed to get Devices: {0}  rdev {2}".format(e, r.content)
+            self.statusmsg = f"Failed to get WiFi devices: {e}"
             _LOGGER.error(self.statusmsg)
-            return []
-
-        return devices
+            return None
 
     def log_request(self, r):
         _LOGGER.debug("Request URL: %s", r.request.url)
@@ -289,31 +312,73 @@ class zteClient:
         # Don't log response content in debug to avoid potential security issues
         _LOGGER.debug("Response status: %d", r.status_code)
 
-    # Parse xml response to get devices
     def parse_devices(
-        self, xml_response, node_name="OBJ_WLAN_AD_ID", network_type="WLAN"
-    ):
+        self, xml_response: str, node_name: str = "OBJ_WLAN_AD_ID", network_type: str = "WLAN"
+    ) -> list[dict[str, Any]]:
         """Parse the xml response and return a list of devices."""
         devices = []
-        xml = ET.fromstring(xml_response)
-        assert xml.tag == "ajax_response_xml_root", (
-            "Unexpected response " + xml_response
-        )
+        
+        try:
+            if not xml_response.strip():
+                _LOGGER.warning("Empty XML response received")
+                return devices
+                
+            xml = ET.fromstring(xml_response)
+            if xml.tag != "ajax_response_xml_root":
+                _LOGGER.warning("Unexpected XML root tag: %s", xml.tag)
+                return devices
 
-        for device in xml.findall(f"{node_name}/Instance"):
-            device_info = {
-                "Active": True,
-                "IconType": None,
-                "NetworkType": network_type,
-            }
-            for i in range(0, int(len(device) / 2)):
-                paramname = device[i * 2].text
-                paramvalue = device[i * 2 + 1].text
-                if paramname == "MACAddress":
-                    device_info["MACAddress"] = paramvalue
-                elif paramname == "IPAddress":
-                    device_info["IPAddress"] = paramvalue
-                elif paramname == "HostName":
-                    device_info["HostName"] = paramvalue
-            devices.append(device_info)
+            instances = xml.findall(f"{node_name}/Instance")
+            _LOGGER.debug("Found %d device instances in XML", len(instances))
+            
+            for device in instances:
+                device_info = {
+                    "Active": True,
+                    "IconType": None,
+                    "NetworkType": network_type,
+                    "MACAddress": "",
+                    "IPAddress": "",
+                    "HostName": "",
+                }
+                
+                # Parse device parameters
+                child_count = len(device)
+                if child_count % 2 != 0:
+                    _LOGGER.warning("Unexpected device XML structure, child count: %d", child_count)
+                    continue
+                    
+                for i in range(0, child_count // 2):
+                    try:
+                        param_name = device[i * 2].text
+                        param_value = device[i * 2 + 1].text
+                        
+                        if param_name and param_value:
+                            if param_name == "MACAddress":
+                                device_info["MACAddress"] = param_value.strip().upper()
+                            elif param_name == "IPAddress":
+                                device_info["IPAddress"] = param_value.strip()
+                            elif param_name == "HostName":
+                                device_info["HostName"] = param_value.strip()
+                            elif param_name == "IconType":
+                                device_info["IconType"] = param_value.strip()
+                            elif param_name == "Active":
+                                device_info["Active"] = param_value.strip().lower() in ("1", "true", "yes")
+                                
+                    except (IndexError, AttributeError) as e:
+                        _LOGGER.warning("Error parsing device parameter %d: %s", i, e)
+                        continue
+                
+                # Only add devices with valid MAC addresses
+                if device_info["MACAddress"]:
+                    devices.append(device_info)
+                else:
+                    _LOGGER.debug("Skipping device without MAC address: %s", device_info)
+                    
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response: %s", e)
+            _LOGGER.debug("XML content: %s", xml_response[:500])
+        except Exception as e:
+            _LOGGER.error("Unexpected error parsing devices: %s", e)
+            
+        _LOGGER.debug("Parsed %d valid devices", len(devices))
         return devices

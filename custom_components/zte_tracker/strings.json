@@ -15,6 +15,8 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to the router. Please check your settings.",
+      "invalid_input": "Invalid input provided. Please check your entries.",
+      "invalid_model": "Selected router model is not supported.",
       "unknown": "Unexpected error occurred"
     },
     "abort": {

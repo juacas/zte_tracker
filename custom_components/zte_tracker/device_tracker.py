@@ -26,17 +26,28 @@ async def async_setup_entry(
     """Set up ZTE device tracker from config entry."""
     coordinator: ZteDataCoordinator = hass.data[DOMAIN][entry.entry_id]
     
+    # Track entities we've already created
+    created_entities = set()
+    
     @callback
     def _async_add_entities():
         """Add device tracker entities for discovered devices."""
-        data = coordinator.data or {}
+        if not coordinator.data:
+            return
+            
+        data = coordinator.data
         devices = data.get("devices", {})
         
         entities = []
         for mac, device_data in devices.items():
-            # Create entity for each device
-            entity = ZteDeviceTrackerEntity(coordinator, entry, mac, device_data)
-            entities.append(entity)
+            if mac in created_entities:
+                continue
+                
+            # Only create entities for devices that have been seen as active at least once
+            if device_data.get("active") or device_data.get("last_seen"):
+                entity = ZteDeviceTrackerEntity(coordinator, entry, mac, device_data)
+                entities.append(entity)
+                created_entities.add(mac)
         
         if entities:
             async_add_entities(entities)
