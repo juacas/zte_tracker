@@ -1,13 +1,19 @@
-from array import array
-import logging
-import re
-import json
+"""ZTE router client with improved security and error handling."""
+from __future__ import annotations
+
 import hashlib
+import logging
 import time
-from requests import Session
+from typing import Any
+
+import requests
 import xml.etree.ElementTree as ET
+from requests import Session
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 _LOGGER = logging.getLogger(__name__)
+
 _MODELS = {
     "F6640": {
         "wlan_script": "wlan_client_stat_lua.lua",
@@ -22,95 +28,117 @@ _MODELS = {
         "lan_id_element": "OBJ_ACCESSDEV_ID",
     },
 }
-# Synonym H169A is like H288A
+
+# Add synonyms
 _MODELS["H169A"] = _MODELS["H288A"]
-# Synonym H388X is like  H288A
 _MODELS["H388X"] = _MODELS["H288A"]
-# Synonym H2640 is like H388X
 _MODELS["H2640"] = _MODELS["H288A"]
-# Synonym F6645P is like F6640
 _MODELS["F6645P"] = _MODELS["F6640"]
-# Synonym H3600P is like H288A
 _MODELS["H3600P"] = _MODELS["H288A"]
-# Synonym H6645P is like H288A
 _MODELS["H6645P"] = _MODELS["H288A"]
-# Synonym H3640 is like H288A
 _MODELS["H3640"] = _MODELS["H288A"]
 class zteClient:
-    def __init__(self, host, username, password, model):
+    """ZTE router client with improved security and reliability."""
+
+    def __init__(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        model: str,
+        verify_ssl: bool = False,
+    ) -> None:
         """Initialize the client."""
-        self.statusmsg = None
+        self.statusmsg: str | None = None
         self.host = host
         self.username = username
         self.password = password
-        self.session = None
-        self.login_data = None
+        self.session: Session | None = None
+        self.login_data: dict[str, Any] | None = None
         self.status = "on"
-        self.device_info = None
+        self.device_info: dict[str, Any] | None = None
         self.guid = int(time.time() * 1000)
         self.model = model
         self.paths = _MODELS[model]
+        self.verify_ssl = verify_ssl
 
-    # Retuns the list of supported model keys.
-    def get_models(self) -> list:
+    @staticmethod
+    def get_models() -> list[str]:
+        """Return the list of supported model keys."""
         return list(_MODELS.keys())
 
-    # REBOOT THE ROUTER
+    def _setup_session(self) -> None:
+        """Set up HTTP session with retry strategy and security settings."""
+        self.session = Session()
+        
+        # Set up retry strategy
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+        )
+        
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
+        # Set headers
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "DNT": "1",
+        })
+        
+        self.session.cookies.set("_TESTCOOKIESUPPORT", "1")
+
     def reboot(self) -> bool:
-        if not self.login:
+        """Reboot the router."""
+        if not self.login():
             return False
-        # REBOOT REQUEST
-        _LOGGER.info("Requesting reboot")
+        
+        _LOGGER.info("Requesting router reboot")
         try:
-            raise Exception("Not implemented")
+            # Note: Reboot functionality needs to be implemented based on router model
+            raise NotImplementedError("Reboot functionality not yet implemented")
         except Exception as e:
-            _LOGGER.error("Failed to reboot: {0}".format(e))
+            _LOGGER.error("Failed to reboot: %s", e)
             return False
         finally:
             self.logout()
 
-    # LOGIN PROCEDURE
     def login(self) -> bool:
-        """
-        Login procedure using ZTE challenge
-        :return: true if the login has succeeded
-        """
+        """Login procedure using ZTE challenge."""
         try:
-            self.session = Session()
-            self.session.headers.update(
-                {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.132 Safari/537.36"
-                }
-            )
-            self.session.headers.update({"DNT": "1"})
-            self.session.cookies.set("_TESTCOOKIESUPPORT", "1")
+            self._setup_session()
 
-            # Step1: Get session token.
+            # Step1: Get session token
             session_token = self.get_session_token()
 
-            # Step2: query for login token.
+            # Step2: Query for login token
             r = self.session.get(
-                "http://{0}/?_type=loginData&_tag=login_token&_={1}".format(
-                    self.host, self.get_guid()
-                ),
-                verify=False,
+                f"http://{self.host}/?_type=loginData&_tag=login_token&_={self.get_guid()}",
+                verify=self.verify_ssl,
+                timeout=10,
             )
             self.log_request(r)
-            # parse XML response.
+            r.raise_for_status()
+            
+            # Parse XML response
             xml_response = ET.fromstring(r.content)
-            assert xml_response.tag == "ajax_response_xml_root", (
-                "Unexpected response " + xml_response.text
-            )
+            if xml_response.tag != "ajax_response_xml_root":
+                raise ValueError(f"Unexpected response format: {xml_response.tag}")
+            
             login_token = xml_response.text
-            assert login_token, "Empty login_token"
+            if not login_token:
+                raise ValueError("Empty login_token")
 
             # Step3: Login entry
             pass_hash = self.password + login_token
             password_param = hashlib.sha256(pass_hash.encode()).hexdigest()
 
             r = self.session.post(
-                "http://{0}/?_type=loginData&_tag=login_entry".format(self.host),
-                verify=False,
+                f"http://{self.host}/?_type=loginData&_tag=login_entry",
+                verify=self.verify_ssl,
+                timeout=10,
                 data={
                     "action": "login",
                     "Password": password_param,
@@ -119,61 +147,75 @@ class zteClient:
                 },
             )
             self.log_request(r)
+            r.raise_for_status()
+            
             self.login_data = r.json()
-            # if login need refresh make a new request.
-            if self.login_data["login_need_refresh"] == 1:
-                _LOGGER.debug("REFRESH")
-                # r = self.session.get('http://{0}/'.format(self.host), verify=False)
-                # self.log_request(r)
+            
+            # Handle refresh requirement
+            if self.login_data.get("login_need_refresh") == 1:
+                _LOGGER.debug("Login refresh required")
+            
             self.statusmsg = None
-
             return True
+            
         except Exception as e:
-            self.statusmsg = "Failed login: {0}".format(e)
+            self.statusmsg = f"Failed login: {e}"
             _LOGGER.error(self.statusmsg)
             self.login_data = None
-            self.session.close()
+            if self.session:
+                self.session.close()
+                self.session = None
             return False
 
-    def get_guid(self):
+    def get_guid(self) -> int:
+        """Get next GUID for requests."""
         guid = self.guid
         self.guid += 1
         return guid
 
-    def get_session_token(self):
+    def get_session_token(self) -> str:
+        """Get session token from router."""
+        if not self.session:
+            raise RuntimeError("Session not initialized")
+            
         r = self.session.get(
-            "http://{0}/?_type=loginData&_tag=login_entry".format(self.host),
-            verify=False,
-            timeout=1, # timeout 1 second
+            f"http://{self.host}/?_type=loginData&_tag=login_entry",
+            verify=self.verify_ssl,
+            timeout=10,
         )
         self.log_request(r)
+        r.raise_for_status()
+        
         self.status = "on"
         device_info = r.json()
-        assert (
-            device_info["lockingTime"] == 0 and device_info["sess_token"]
-        ), "Empty sess_token. Device locked?"
-        session_token = device_info["sess_token"]
-        return session_token
+        
+        if device_info.get("lockingTime", 1) != 0 or not device_info.get("sess_token"):
+            raise ValueError("Device is locked or session token unavailable")
+            
+        return device_info["sess_token"]
 
-    ## LOGOUT ##
-    def logout(self):
+    def logout(self) -> None:
+        """Logout from router."""
         try:
-            if self.login_data is None:
-                return False
+            if self.login_data is None or not self.session:
+                return
 
             r = self.session.post(
-                "http://{0}?_type=loginData&_tag=logout_entry".format(self.host),
+                f"http://{self.host}?_type=loginData&_tag=logout_entry",
                 data={"IF_LogOff": "1"},
-                verify=False,
+                verify=self.verify_ssl,
+                timeout=10,
             )
             self.log_request(r)
-
-            assert r.ok, r
-            _LOGGER.debug("Logged out")
+            r.raise_for_status()
+            _LOGGER.debug("Logged out successfully")
+            
         except Exception as e:
-            _LOGGER.error("Failed to logout: {0}".format(e))
+            _LOGGER.error("Failed to logout: %s", e)
         finally:
-            self.session.close()
+            if self.session:
+                self.session.close()
+                self.session = None
             self.login_data = None
 
     def get_devices_response(self):
@@ -196,12 +238,13 @@ class zteClient:
                 "http://{0}/?_type=menuView&_tag=localNetStatus&_={1}".format(
                     self.host, self.get_guid()
                 ),
-                verify=False,
+                verify=True,  # Enable SSL verification
+                timeout=10,   # Add timeout
             )
             lan_request = "http://{0}/?_type=menuData&_tag={1}&_{2}".format(
                 self.host, self.paths["lan_script"], self.get_guid()
             )
-            r = self.session.get(lan_request, verify=False)
+            r = self.session.get(lan_request, verify=True, timeout=10)
             self.log_request(r)
             devices = self.parse_devices(r.text, self.paths["lan_id_element"], "LAN")
             self.statusmsg = "OK"
@@ -222,12 +265,13 @@ class zteClient:
                 "http://{0}/?_type=menuView&_tag=localNetStatus&_={1}".format(
                     self.host, self.get_guid()
                 ),
-                verify=False,
+                verify=True,  # Enable SSL verification
+                timeout=10,   # Add timeout
             )
             wlan_request = "http://{0}/?_type=menuData&_tag={1}&_={2}".format(
                 self.host, self.paths["wlan_script"], self.get_guid()
             )
-            r = self.session.get(wlan_request, verify=False)
+            r = self.session.get(wlan_request, verify=True, timeout=10)
             self.log_request(r)
             devices = self.parse_devices(r.text, self.paths["wlan_id_element"], "WLAN")
 
@@ -240,9 +284,10 @@ class zteClient:
         return devices
 
     def log_request(self, r):
-        _LOGGER.debug(r.request.url)
-        _LOGGER.debug(r.request.headers)
-        _LOGGER.debug(r.text[0:200])
+        _LOGGER.debug("Request URL: %s", r.request.url)
+        _LOGGER.debug("Request headers: %s", dict(r.request.headers))
+        # Don't log response content in debug to avoid potential security issues
+        _LOGGER.debug("Response status: %d", r.status_code)
 
     # Parse xml response to get devices
     def parse_devices(

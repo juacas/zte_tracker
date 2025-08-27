@@ -1,139 +1,140 @@
-"""Support for ZTE routers."""
-from .const import DOMAIN, DOMAIN_DATA, ICONS
-import voluptuous as vol
-import logging
-from collections import namedtuple
+"""Device tracker platform for ZTE Tracker."""
+from __future__ import annotations
 
-from homeassistant.components.device_tracker import (
-    DeviceScanner,
-)
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
-import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers import config_validation as cv, entity_platform, service
-from .zteclient.zte_client import zteClient
+import logging
+from typing import Any
+
+from homeassistant.components.device_tracker import SourceType
+from homeassistant.components.device_tracker.config_entry import ScannerEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import DOMAIN, ICONS
+from .coordinator import ZteDataCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def get_scanner(hass, config):
-    """Validate the configuration and return a ZTE scanner."""
-    shared_data = hass.data[DOMAIN]
-    scanner = shared_data.get('scanner')
-    return scanner
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up ZTE device tracker from config entry."""
+    coordinator: ZteDataCoordinator = hass.data[DOMAIN][entry.entry_id]
+    
+    @callback
+    def _async_add_entities():
+        """Add device tracker entities for discovered devices."""
+        data = coordinator.data or {}
+        devices = data.get("devices", {})
+        
+        entities = []
+        for mac, device_data in devices.items():
+            # Create entity for each device
+            entity = ZteDeviceTrackerEntity(coordinator, entry, mac, device_data)
+            entities.append(entity)
+        
+        if entities:
+            async_add_entities(entities)
+    
+    # Add initial entities
+    _async_add_entities()
+    
+    # Listen for new devices
+    coordinator.async_add_listener(_async_add_entities)
 
 
-Device = namedtuple("Device", ["name", "ip", "mac", "state", "icon"])
+class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
+    """Representation of a ZTE tracked device."""
 
-class zteDeviceScanner(DeviceScanner):
-    """This class queries a router running ZTE firmware."""
-    status = 'on'
-    statusmsg = ''
-    scanning = True
-    # list of macs that have been seen.
-    last_seen_devices = []
-    # list of devices (Device tuples) that have been seen.
-    last_results = []
-
-    def __init__(self, hass, cli):
-        """Initialize the scanner.
-        :type cli: zteClient
-        """
-        _LOGGER.info("===============================================================================================")
-        _LOGGER.info(" ZTE_tracker start device Scanner for model for model {0}".format(cli.model))
-        _LOGGER.info(" Supported models: {0}".format(cli.get_models()))
-        _LOGGER.info("===============================================================================================")
-        self.router_client = cli
-        self.hass = hass
-        self.last_results = []
-    def pause(self):
-        self.status = 'paused'
-        self.scanning = False
-        self.statusmsg = 'Tracker is paused.'
-        _LOGGER.info("Tracker is paused.")
-
-    def resume(self):
-        self.status = 'on'
-        self.scanning = True
-        self.statusmsg = 'Tracker is resumed.'
-        _LOGGER.info("Tracker is resumed.")
-
-    def scan_devices(self):
-        """Scan for new devices and return a list with found device IDs."""
-        _LOGGER.debug("Scan_devices invoked.")
-        if self._update_info() == False:
-            self.scanning = False
-            _LOGGER.warning("Can't update device list")
-            return []
-        else:
-            clients = [client.mac for client in self.last_results]
-            self.last_seen_devices = clients
-            self.scanning = True
-            return clients
-
-    def get_device_name(self, device):
-        """Return the name of the given device or None if we don't know."""
-        if not self.last_results:
-            return None
-        for client in self.last_results:
-            if client.mac == device:
-                return client.name
-        return None
-
-    def _update_info(self):
-        """Ensure the information from the router is up to date.
-
-        Return boolean if scanning successful.
-        """
-        data = self._get_data()
-        if not data:
-            return False
-        # Filter out clients that are not connected.
-        active_clients = [client for client in data if client.state]
-        self.last_results = active_clients
-
-        _LOGGER.debug(
-            "%s Active clients: %s",
-            len(active_clients),
-            ",".join(f"{client.mac} {client.name}" for client in active_clients),
+    def __init__(
+        self,
+        coordinator: ZteDataCoordinator,
+        entry: ConfigEntry,
+        mac: str,
+        device_data: dict[str, Any],
+    ) -> None:
+        """Initialize the device tracker."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._mac = mac
+        self._device_data = device_data
+        
+        # Generate unique ID and name
+        self._attr_unique_id = f"{entry.entry_id}_{mac.replace(':', '_')}"
+        self._attr_name = device_data.get("name") or f"Device {mac}"
+        
+        # Set up device info
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._attr_unique_id)},
+            name=self._attr_name,
+            via_device=(DOMAIN, entry.entry_id),
         )
-        return True
 
-    def _get_data(self)->list:
-        """
-        Get the devices' data from the router.
-        Returns a list with all the devices known to the router DHCP server.
-        """
-        devices = []
-        try:
-            if self.status == 'paused':
-                _LOGGER.info("Tracker is paused.Scan bypassed.")
-                self.scanning = False
-                return []
-            elif not self.router_client.login():
-                self.scanning = False
-                _LOGGER.warning("Login failed: {0}@{1}".format(self.router_client.username, self.router_client.host))
-                self.router_client.logout()
-                return []
-            # Get the devices from the router.
-            device_list = self.router_client.get_devices_response()
-        finally:
-            self.router_client.logout()
+    @property
+    def source_type(self) -> SourceType:
+        """Return the source type of the device."""
+        return SourceType.ROUTER
 
-        self.statusmsg = self.router_client.statusmsg
-        self.scanning = True
+    @property
+    def is_connected(self) -> bool:
+        """Return true if the device is connected to the network."""
+        data = self.coordinator.data or {}
+        devices = data.get("devices", {})
+        device = devices.get(self._mac, {})
+        return device.get("active", False)
 
-        # Create a list of Device tuples.
-        if device_list != False:
-            for device in device_list:
-                icon = ICONS.get(device['IconType'], None)
-                dev = Device(
-                    device.get('HostName', 'Unknown'),
-                    device['IPAddress'],
-                    device['MACAddress'],
-                    device['Active'],
-                    icon
-                )
-                devices.append(dev)
-            return devices
-        else:
-            return []
+    @property
+    def ip_address(self) -> str | None:
+        """Return the IP address of the device."""
+        data = self.coordinator.data or {}
+        devices = data.get("devices", {})
+        device = devices.get(self._mac, {})
+        return device.get("ip")
+
+    @property
+    def mac_address(self) -> str:
+        """Return the MAC address of the device."""
+        return self._mac
+
+    @property
+    def hostname(self) -> str | None:
+        """Return the hostname of the device."""
+        data = self.coordinator.data or {}
+        devices = data.get("devices", {})
+        device = devices.get(self._mac, {})
+        return device.get("name")
+
+    @property
+    def icon(self) -> str | None:
+        """Return the icon for the device."""
+        data = self.coordinator.data or {}
+        devices = data.get("devices", {})
+        device = devices.get(self._mac, {})
+        icon_type = device.get("icon_type")
+        return ICONS.get(icon_type) if icon_type else "mdi:devices"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        data = self.coordinator.data or {}
+        devices = data.get("devices", {})
+        device = devices.get(self._mac, {})
+        
+        return {
+            "mac_address": self._mac,
+            "ip_address": device.get("ip"),
+            "hostname": device.get("name"),
+            "network_type": device.get("network_type"),
+            "icon_type": device.get("icon_type"),
+            "last_seen": device.get("last_seen"),
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to hass."""
+        await super().async_added_to_hass()
+        _LOGGER.debug("Added device tracker for MAC: %s", self._mac)

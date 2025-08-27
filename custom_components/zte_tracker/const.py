@@ -1,16 +1,15 @@
 """Constants for zte_tracker."""
 # Base component constants
-from unittest.mock import DEFAULT
-
+from homeassistant.const import Platform
 
 DOMAIN = "zte_tracker"
-DOMAIN_DATA = "{}_data".format(DOMAIN)
-VERSION = "1.3.11"
-PLATFORMS = ["sensor", "device_tracker"]
+DOMAIN_DATA = f"{DOMAIN}_data"
+VERSION = "1.3.12"
+PLATFORMS = [Platform.SENSOR, Platform.DEVICE_TRACKER]
 ISSUE_URL = "https://github.com/juacas/zte_tracker/issues"
-DEFAULT_HOST = '192.168.1.1'
-DEFAULT_USERNAME = 'admin'
-DEFAULT_PASSWORD = 'admin'
+DEFAULT_HOST = "192.168.1.1"
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "admin"
 
 STARTUP = """
 -------------------------------------------------------------------
@@ -22,22 +21,17 @@ If you have any issues with this you need to open an issue here:
 -------------------------------------------------------------------
 """
 
-
 # Icons
 ICON = "mdi:router-wireless"
 
-
 ICONS = {
-    'DesktopComputer': 'mdi:desktop-classic',
-    'laptop': 'mdi:laptop',
-    'smartphone': 'mdi:cellphone-wireless',
-    'game': 'mdi:gamepad-variant',
-    'stb': 'mdi:television',
-    'camera': 'mdi:cctv'
+    "DesktopComputer": "mdi:desktop-classic",
+    "laptop": "mdi:laptop",
+    "smartphone": "mdi:cellphone-wireless",
+    "game": "mdi:gamepad-variant",
+    "stb": "mdi:television",
+    "camera": "mdi:cctv",
 }
-# Configuration
-# CONF_NAME = "name"
-# CONF_SCAN_INTERVAL = "scan_interval"
 
 # Defaults
 DEFAULT_NAME = "ZTE router tracker"
