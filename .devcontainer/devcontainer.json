@@ -1,31 +1,77 @@
-// See https://aka.ms/vscode-remote/devcontainer.json for format details.
 {
-	"image": "ludeeus/container:integration-debian",
-	"name": "ZTE Tracker development",
-	"context": "..",
+	"name": "ZTE Tracker Home Assistant Core Development",
+	"image": "python:3.13",
 	"appPort": [
-		"9123:8123",
-		"5678:5678"
+		"8123:8123"
 	],
-	"postCreateCommand": "container install",
-	"extensions": [
-		"ms-python.python",
-		"github.vscode-pull-request-github",
-		"ryanluker.vscode-coverage-gutters",
-		"ms-python.vscode-pylance"
+	"context": "..",
+	"postCreateCommand": "bash .devcontainer/setup.sh",
+	"forwardPorts": [8123],
+	"portsAttributes": {
+		"8123": {
+			"label": "Home Assistant",
+			"onAutoForward": "openBrowser"
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"ms-python.black-formatter",
+				"ms-python.isort",
+				"ms-python.flake8",
+				"github.vscode-pull-request-github",
+				"ryanluker.vscode-coverage-gutters",
+				"ms-vscode.vscode-json",
+				"redhat.vscode-yaml",
+				"esbenp.prettier-vscode",
+				"bradlc.vscode-tailwindcss",
+				"ms-vscode.test-adapter-converter",
+				"littlefoxteam.vscode-python-test-adapter"
+			],
+			"settings": {
+				"files.eol": "\n",
+				"files.trimTrailingWhitespace": true,
+				"editor.tabSize": 4,
+				"editor.insertSpaces": true,
+				"editor.formatOnSave": true,
+				"python.defaultInterpreterPath": "/usr/local/bin/python",
+				"python.analysis.autoSearchPaths": false,
+				"python.analysis.typeCheckingMode": "basic",
+				"python.testing.pytestEnabled": true,
+				"python.testing.unittestEnabled": false,
+				"python.testing.pytestArgs": [
+					"tests"
+				],
+				"[python]": {
+					"editor.defaultFormatter": "ms-python.black-formatter",
+					"editor.codeActionsOnSave": {
+						"source.organizeImports": "explicit"
+					}
+				},
+				"[yaml]": {
+					"editor.defaultFormatter": "redhat.vscode-yaml",
+					"editor.insertSpaces": true,
+					"editor.tabSize": 2
+				},
+				"[json]": {
+					"editor.defaultFormatter": "esbenp.prettier-vscode"
+				},
+				"yaml.schemas": {
+					"https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/helpers/config_validation.py": [
+						"configuration.yaml",
+						"*.yaml"
+					]
+				}
+			}
+		}
+	},
+	"mounts": [
+		"source=${localWorkspaceFolder}/custom_components,target=/workspaces/homeassistant-core/custom_components,type=bind"
 	],
-	"settings": {
-		"files.eol": "\n",
-		"editor.tabSize": 4,
-		"terminal.integrated.shell.linux": "/bin/bash",
-		"python.pythonPath": "/usr/bin/python3",
-		"python.analysis.autoSearchPaths": false,
-		"python.linting.pylintEnabled": true,
-		"python.linting.enabled": true,
-		"python.formatting.provider": "black",
-		"editor.formatOnPaste": false,
-		"editor.formatOnSave": true,
-		"editor.formatOnType": true,
-		"files.trimTrailingWhitespace": true
-	}
+	"runArgs": [
+		"--privileged",
+		// "--name", "${localEnv:USER}_HA_devcontainer",
+	]
 }

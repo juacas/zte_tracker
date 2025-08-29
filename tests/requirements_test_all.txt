@@ -1,0 +1,21 @@
+# Dependencias básicas de Home Assistant Core
+homeassistant
+
+# Herramientas para pruebas
+pytest
+pytest-asyncio
+pytest-cov
+pytest-mock
+
+# Herramientas de linters y calidad de código
+flake8
+black
+isort
+mypy
+
+# Dependencias adicionales para integraciones específicas
+aiohttp
+requests
+
+# Dependencias para pruebas de integración
+pytest-homeassistant-custom-component

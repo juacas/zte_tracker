@@ -1,69 +1,111 @@
-"""Sensor platform for zte."""
-from datetime import timedelta
-from homeassistant.helpers.entity import Entity
+"""Sensor platform for ZTE Tracker."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from homeassistant.components.sensor import SensorEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 from .const import DOMAIN, ICON
-import logging
-# SCAN_INTERVAL = timedelta(seconds=10)
-_LOGGER = logging.getLogger(__name__)
+from .coordinator import ZteDataCoordinator
 
 
-async def async_setup_platform(hass, _config, async_add_entities, discovery_info=None):
-    """Setup sensor platform."""
-    _LOGGER.debug("Adding zte entity")
-    async_add_entities([zteSensor(hass, discovery_info)])
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up ZTE sensor from config entry."""
+    coordinator: ZteDataCoordinator = hass.data[DOMAIN][entry.entry_id]
+
+    async_add_entities(
+        [
+            ZteRouterSensor(coordinator, entry),
+            ZteDeviceCountSensor(coordinator, entry),
+        ]
+    )
 
 
-class zteSensor(Entity):
-    """ zte Sensor class."""
+class ZteBaseSensor(CoordinatorEntity, SensorEntity):
+    """Base class for ZTE sensors."""
 
-    def __init__(self, hass, config):
-        _LOGGER.debug(f"Initializing zteSensor entity: sensor.{__name__}")
-        self.hass = hass
-        self._attr = {}
-        self._state = None
-        self._unique_id = f"{DOMAIN}_sensor_main"
-        self._name = DOMAIN
-        self.scanner = self.hass.data[DOMAIN].get("scanner")
+    def __init__(self, coordinator: ZteDataCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=f"ZTE Router {coordinator.client.host}",
+            manufacturer="ZTE",
+            model=coordinator.client.model,
+            sw_version=coordinator.client.model,
+        )
 
-    async def async_update(self):
-        """Update the sensor."""
 
-        # Check the data and update the value.
-        self._state = self.scanner.status
-        # Format list of devices.
-        devices = []
-        for device in self.scanner.last_results:
-            devices.append(f"{device.mac}({device.name}-{device.ip})")
-        # Set/update attributes
-        self._attr = {
-            'last_reboot': self.hass.data[DOMAIN].get("last_reboot", None),
-            'scanning': self.scanner.scanning,
-            'devices': devices,
-            'num_devices': len(self.scanner.last_results),
-            'statusmsg': self.scanner.statusmsg
+class ZteRouterSensor(ZteBaseSensor):
+    """Sensor representing the router status."""
+
+    def __init__(self, coordinator: ZteDataCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the router sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_name = f"ZTE Router {coordinator.client.host}"
+        self._attr_unique_id = f"{entry.entry_id}_status"
+        self._attr_icon = ICON
+
+    @property
+    def native_value(self) -> str:
+        """Return the state of the sensor."""
+        data = self.coordinator.data or {}
+        router_info = data.get("router_info", {})
+        return router_info.get("status", "unknown")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        data = self.coordinator.data or {}
+        router_info = data.get("router_info", {})
+        return {
+            "host": router_info.get("host"),
+            "model": router_info.get("model"),
+            "status": router_info.get("status"),
+            "last_update": datetime.now().isoformat(),
         }
 
-    @property
-    def should_poll(self):
-        """Return the name of the sensor."""
-        return True
+
+class ZteDeviceCountSensor(ZteBaseSensor):
+    """Sensor for the number of connected devices."""
+
+    def __init__(self, coordinator: ZteDataCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the device count sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_name = f"ZTE Router {coordinator.client.host} Connected Devices"
+        self._attr_unique_id = f"{entry.entry_id}_device_count"
+        self._attr_icon = "mdi:devices"
+        self._attr_native_unit_of_measurement = "devices"
 
     @property
-    def name(self):
-        """Return the name of the sensor."""
-        return self._name
+    def native_value(self) -> int:
+        """Return the number of connected devices."""
+        data = self.coordinator.data or {}
+        devices = data.get("devices", {})
+        return len([d for d in devices.values() if d.get("active")])
 
     @property
-    def state(self):
-        """Return the state of the sensor."""
-        return self._state
-
-    @property
-    def icon(self):
-        """Return the icon of the sensor."""
-        return ICON
-
-    @property
-    def extra_state_attributes(self):
-        """Return the state attributes."""
-        return self._attr
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes, including the list of detected devices."""
+        data = self.coordinator.data or {}
+        devices = data.get("devices", {})
+        device_list = [
+            f"{mac}({device.get('name', 'Unknown')}-{device.get('ip', '')})"
+            for mac, device in devices.items()
+        ]
+        return {
+            "devices": device_list,
+            "num_devices": len([d for d in devices.values() if d.get("active")]),
+        }

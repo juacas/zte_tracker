@@ -1,9 +1,50 @@
 {
-    "title": "ZTE Tracker",
-    "services": {
-        "pause": {
-            "name": "Pause and resume tracker",
-            "description": "Pause and resume tracker (for allowing to administer the router). Toggle status."
+  "title": "ZTE Tracker",
+  "config": {
+    "step": {
+      "user": {
+        "title": "ZTE Router Configuration",
+        "description": "Configure your ZTE router for device tracking",
+        "data": {
+          "host": "Router IP Address",
+          "username": "Username",
+          "password": "Password",
+          "model": "Router Model"
         }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the router. Please check your settings.",
+      "invalid_input": "Invalid input provided. Please check your entries.",
+      "invalid_model": "Selected router model is not supported.",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Router is already configured"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ZTE Router Options",
+        "description": "Update ZTE router configuration",
+        "data": {
+          "host": "Router IP Address",
+          "username": "Username", 
+          "password": "Password",
+          "model": "Router Model"
+        }
+      }
+    }
+  },
+  "services": {
+    "pause": {
+      "name": "Pause and resume tracker",
+      "description": "Pause and resume tracker (for allowing to administer the router). Toggle status."
+    },
+    "reboot": {
+      "name": "Reboot router",
+      "description": "Reboot the ZTE router"
+    }
+  }
 }
