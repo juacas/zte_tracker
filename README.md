@@ -27,7 +27,7 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 ### Router Management
 
 - **Router status monitoring** with connection health indicators
-- **Remote router reboot** capability through service calls
+- **Remote router reboot** capability through service calls (Unimplemented)
 - **Pause/resume scanning** to allow administrative access to router
 - **Real-time statistics** including device counts and connection status
 
@@ -122,17 +122,9 @@ zte_tracker:
 
 ## 🎯 Services
 
-### `zte_tracker.pause`
-
-Toggles scanning on/off. Useful when you need to access the router's web interface without interference.
-
-```yaml
-service: zte_tracker.pause
-```
-
 ### `zte_tracker.reboot`
 
-Remotely reboots the router (when supported by the router model).
+Remotely reboots the router (when supported by the router model, currently unimplemented).
 
 ```yaml
 service: zte_tracker.reboot
@@ -153,6 +145,13 @@ service: zte_tracker.remove_tracked_entity
 data:
   mac: E4:BC:AA:0D:B8:F6
 ```
+
+## 🕹️ Pause/Resume Tracker
+
+To pause or resume the tracker, use the ZTE Tracker Pause switch in the Home Assistant UI. This is useful when you need to access the router's web interface without interference.
+
+- Entity: `switch.zte_tracker_pause`
+- State: `on` (paused), `off` (running)
 
 ## 🔍 Advanced Configuration
 

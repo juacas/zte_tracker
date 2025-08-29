@@ -100,13 +100,13 @@ class zteClient:
 
     def reboot(self) -> bool:
         """Reboot the router."""
-        if not self.login():
-            return False
-
-        _LOGGER.info("Requesting router reboot")
         try:
             # Note: Reboot functionality needs to be implemented based on router model
             raise NotImplementedError("Reboot functionality not yet implemented")
+            if not self.login():
+                return False
+
+            _LOGGER.info("Requesting router reboot")
         except Exception as e:
             _LOGGER.error("Failed to reboot: %s", e)
             return False

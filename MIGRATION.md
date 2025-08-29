@@ -17,6 +17,7 @@ Your existing device trackers and automations will continue working without chan
 ### From YAML Configuration
 
 #### Before (v1.3.x)
+
 ```yaml
 # configuration.yaml
 zte_tracker:
@@ -32,7 +33,9 @@ zte_tracker:
 ```
 
 #### After (v1.4.0)
+
 1. **Remove YAML configuration**:
+
    ```yaml
    # Remove this entire section from configuration.yaml
    # zte_tracker:
@@ -41,12 +44,13 @@ zte_tracker:
    ```
 
 2. **Add through UI**:
+
    - Go to **Settings** → **Devices & Services**
    - Click **Add Integration**
    - Search for "ZTE Tracker"
    - Enter the same details you had in YAML
 
-3. **Update secrets** (if needed):
+3. **Delete secrets** (if needed):
    ```yaml
    # secrets.yaml - keep your existing password
    zte_password: your_router_password
@@ -57,12 +61,14 @@ zte_tracker:
 Some entity IDs may change to follow modern conventions:
 
 #### Old Format
+
 ```
 sensor.zte_tracker
 device_tracker.unknown_device_001122334455
 ```
 
-#### New Format  
+#### New Format
+
 ```
 sensor.zte_router_192_168_1_1
 sensor.zte_router_192_168_1_1_connected_devices
@@ -70,6 +76,7 @@ device_tracker.zte_001122334455
 ```
 
 #### Updating Automations
+
 If your automations use the old entity IDs, update them:
 
 ```yaml
@@ -95,12 +102,14 @@ automation:
 ### Polling Intervals
 
 #### Before (Fixed Intervals)
+
 ```yaml
 zte_tracker:
-  interval_seconds: 60  # Fixed 60-second polling
+  interval_seconds: 60 # Fixed 60-second polling
 ```
 
 #### After (Adaptive Intervals)
+
 - **No configuration needed** - automatically adapts:
   - Fast (30s) when devices are connecting/disconnecting
   - Normal (60s) for stable networks
@@ -109,6 +118,7 @@ zte_tracker:
 ### Device Tracking Options
 
 #### Before
+
 ```yaml
 zte_tracker:
   new_device_defaults:
@@ -117,8 +127,9 @@ zte_tracker:
 ```
 
 #### After
+
 - **Device tracking** is now handled by Home Assistant's device tracker settings
-- **Consider home** can be set per device in the UI
+- **Consider home** is now handled by Home Assistant's device tracker settings
 - **New devices** are automatically detected and can be enabled/disabled individually
 
 ## 🎯 Service Changes
@@ -126,21 +137,26 @@ zte_tracker:
 Services remain compatible, but gain new features:
 
 ### Before
+
 ```yaml
 # Basic pause/resume
-service: zte_tracker.pause
+# service: zte_tracker.pause (removed)
 ```
 
 ### After
+
 ```yaml
-# Enhanced with status feedback
-service: zte_tracker.pause
-# Now provides status information in response
+# Use the ZTE Tracker Pause switch to pause/resume scanning
+# Entity: switch.zte_tracker_pause
+```
 
 # New reboot service
+
 service: zte_tracker.reboot
+
 # Remotely reboot the router (when supported)
-```
+
+````
 
 ## 📊 New Features Available
 
@@ -183,7 +199,7 @@ After migration, you gain access to:
 #### "Router connection issues"
 1. Verify router credentials haven't changed
 2. Check router IP address
-3. Use the pause service if accessing router web interface
+3. Use the pause switch if accessing router web interface
 
 ### Debug Information
 
@@ -194,7 +210,7 @@ logger:
   default: info
   logs:
     custom_components.zte_tracker: debug
-```
+````
 
 ### Validation Steps
 
@@ -223,16 +239,19 @@ If you encounter issues during migration:
 Once migration is complete, you'll enjoy:
 
 ### Performance
+
 - Faster device detection and updates
 - Reduced impact on router performance
 - More reliable connections
 
 ### Features
+
 - Modern UI configuration
 - Better device management
 - Enhanced monitoring capabilities
 
 ### Maintenance
+
 - Automatic updates through HACS
 - Better error messages and diagnostics
 - Future-proof architecture
