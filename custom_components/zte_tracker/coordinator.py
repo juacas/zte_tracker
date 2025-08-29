@@ -39,7 +39,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         self._stable_count = 0
         self._device_cache: dict[str, dict[str, Any]] = {}
         self._last_successful_update: datetime | None = None
-        
+
         super().__init__(
             hass,
             _LOGGER,
@@ -106,14 +106,14 @@ class ZteDataCoordinator(DataUpdateCoordinator):
     def _merge_device_data(self, new_devices: list[dict[str, Any]]) -> dict[str, Any]:
         """Merge new device data with cached data for better stability."""
         processed_devices = {}
-        
+
         # Update cache with new data
         current_macs = set()
         for device in new_devices:
             mac = device.get("MACAddress")
             if not mac:
                 continue
-                
+
             current_macs.add(mac)
             device_data = {
                 "name": device.get("HostName", "Unknown"),
@@ -123,15 +123,18 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 "icon_type": device.get("IconType"),
                 "network_type": device.get("NetworkType", "Unknown"),
                 "last_seen": datetime.now().isoformat(),
+                "port": device.get("Port", ""),  # LAN port or WLAN ESSID
+                "LinkTime": device.get("LinkTime", ""),
+                "ConnectTime": device.get("ConnectTime", ""),
             }
-            
+
             # Merge with cached data if available
             if mac in self._device_cache:
                 cached = self._device_cache[mac]
                 # Keep the name if new one is generic and cached one is better
                 if device_data["name"] in ("Unknown", mac) and cached.get("name", "Unknown") not in ("Unknown", mac):
                     device_data["name"] = cached["name"]
-                    
+
                 # Keep last_seen from cache if device is not currently active
                 if not device_data["active"] and cached.get("last_seen"):
                     device_data["last_seen"] = cached["last_seen"]
@@ -167,7 +170,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             """Fetch devices in executor."""
             try:
                 if not self.client.login():
-                    _LOGGER.warning("Login failed: %s@%s", 
+                    _LOGGER.warning("Login failed: %s@%s",
                                    self.client.username, self.client.host)
                     return None
 
@@ -183,11 +186,11 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                     pass
 
         devices = await self.hass.async_add_executor_job(_fetch_devices)
-        
+
         if devices is None:
             self._available = False
             # Return cached data on failure if we have it and it's recent
-            if (self._device_cache and self._last_successful_update and 
+            if (self._device_cache and self._last_successful_update and
                 datetime.now() - self._last_successful_update < timedelta(minutes=10)):
                 _LOGGER.warning("Using cached data due to connection failure")
                 return {
@@ -202,10 +205,10 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
         self._available = True
         self._last_successful_update = datetime.now()
-        
+
         # Process devices with caching
         processed_devices = self._merge_device_data(devices)
-        
+
         # Adjust polling interval based on device activity
         active_count = len([d for d in processed_devices.values() if d.get("active")])
         self._adjust_update_interval(active_count)

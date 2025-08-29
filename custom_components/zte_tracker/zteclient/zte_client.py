@@ -1,18 +1,20 @@
 from __future__ import annotations
+
 """ZTE router client with improved security and error handling."""
 
 import hashlib
 import logging
 import time
 from typing import Any
+import warnings
 import xml.etree.ElementTree as ET
 
 import requests
 from requests import Session
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-import warnings
 from urllib3.exceptions import InsecureRequestWarning
+from urllib3.util.retry import Retry
+
 # Suppress InsecureRequestWarning globally
 warnings.simplefilter("ignore", InsecureRequestWarning)
 
@@ -407,6 +409,21 @@ class zteClient:
                 _LOGGER.error("Router error: %s", error_str)
                 raise Exception(f"Router error: {error_str}")
 
+            # Parse WLAN AP info for ESSID mapping
+            wlanap_map = {}
+            for ap_instance in xml.findall("OBJ_WLANAP_ID/Instance"):
+                ap_id = None
+                essid = None
+                for i in range(0, len(ap_instance) // 2):
+                    pname = ap_instance[i * 2].text
+                    pvalue = ap_instance[i * 2 + 1].text
+                    if pname == "_InstID":
+                        ap_id = pvalue
+                    elif pname == "ESSID":
+                        essid = pvalue
+                if ap_id and essid:
+                    wlanap_map[ap_id] = essid
+
             instances = xml.findall(f"{node_name}/Instance")
             _LOGGER.debug("Found %d device instances in XML", len(instances))
 
@@ -418,6 +435,9 @@ class zteClient:
                     "MACAddress": "",
                     "IPAddress": "",
                     "HostName": "",
+                    "Port": "",  # LAN port or WLAN ESSID
+                    "LinkTime": "",
+                    "ConnectTime": "",
                 }
 
                 # Parse device parameters
@@ -428,30 +448,43 @@ class zteClient:
                     )
                     continue
 
+
                 for i in range(0, child_count // 2):
                     try:
                         param_name = device[i * 2].text
                         param_value = device[i * 2 + 1].text
 
                         if param_name and param_value:
-                            if param_name == "MACAddress":
-                                device_info["MACAddress"] = param_value.strip().upper()
-                            elif param_name == "IPAddress":
-                                device_info["IPAddress"] = param_value.strip()
-                            elif param_name == "HostName":
-                                device_info["HostName"] = param_value.strip()
-                            elif param_name == "IconType":
-                                device_info["IconType"] = param_value.strip()
-                            elif param_name == "Active":
-                                device_info["Active"] = param_value.strip().lower() in (
+                            pname = param_name.strip()
+                            pvalue = param_value.strip()
+                            if pname == "MACAddress":
+                                device_info["MACAddress"] = pvalue.upper()
+                            elif pname == "IPAddress":
+                                device_info["IPAddress"] = pvalue
+                            elif pname == "HostName":
+                                device_info["HostName"] = pvalue
+                            elif pname == "IconType":
+                                device_info["IconType"] = pvalue
+                            elif pname == "Active":
+                                device_info["Active"] = pvalue.lower() in (
                                     "1",
                                     "true",
                                     "yes",
                                 )
+                            elif pname == "LinkTime":
+                                device_info["LinkTime"] = pvalue
+                            elif pname == "ConnectTime":
+                                device_info["ConnectTime"] = pvalue
+                            elif pname == "AliasName":  # Contains the LAN port.
+                                device_info["Port"] = pvalue
 
                     except (IndexError, AttributeError) as e:
                         _LOGGER.warning("Error parsing device parameter %d: %s", i, e)
                         continue
+
+                # Remap Port from WLAN AP map
+                if device_info["Port"] and device_info["Port"] in wlanap_map:
+                    device_info["Port"] = wlanap_map[device_info["Port"]]
 
                 # Only add devices with valid MAC addresses
                 if device_info["MACAddress"]:

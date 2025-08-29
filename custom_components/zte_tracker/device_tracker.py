@@ -34,13 +34,11 @@ async def async_setup_entry(
     # Obtener el área del dispositivo ZTERouter
     device_registry = hass.data.get("device_registry")
     entity_registry = er.async_get(hass)
-    zte_device = None
     area_id = None
     # Buscar el dispositivo ZTERouter por entry_id
     if device_registry:
         for dev in device_registry.devices.values():
             if entry.entry_id in dev.identifiers:
-                zte_device = dev
                 area_id = dev.area_id
                 break
 
@@ -257,6 +255,9 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
             "network_type": device.get("network_type"),
             "icon_type": device.get("icon_type"),
             "last_seen": device.get("last_seen"),
+            "port": device.get("port"),
+            "link_time": device.get("LinkTime"),
+            "connect_time": device.get("ConnectTime"),
         }
 
     async def async_added_to_hass(self) -> None:
