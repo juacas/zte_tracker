@@ -91,23 +91,28 @@ async def async_setup_entry(
     # Add initial entities
     _async_add_entities()
 
-    # Marcar entidades registradas como ausentes si no están activas
-    entity_registry = er.async_get(hass)
-    # Buscar entidades del dominio device_tracker y de este entry
-    for entity_id, entity in entity_registry.entities.items():
-        if entity.domain == "device_tracker" and entity.platform == DOMAIN:
-            # Extraer MAC del unique_id
-            mac = entity.unique_id.split("_")[-1].replace("_", ":")
-            # Si el dispositivo no está activo, actualizar su estado
-            devices = coordinator.data.get("devices", {}) if coordinator.data else {}
-            device = devices.get(mac)
-            if not device or not device.get("active"):
-                # Buscar la entidad en Home Assistant y actualizar su estado
-                tracker_entity = hass.states.get(entity_id)
-                if tracker_entity:
-                    attrs = dict(tracker_entity.attributes)
-                    attrs["active"] = False
-                    hass.states.async_set(entity_id, "not_home", attrs)
+    def _mark_undetected_entities():
+        entity_registry = er.async_get(hass)
+        for entity_id, entity in entity_registry.entities.items():
+            if entity.domain == "device_tracker" and entity.platform == DOMAIN:
+                mac = entity.unique_id.split("_")[-1].replace("_", ":")
+                devices = (
+                    coordinator.data.get("devices", {}) if coordinator.data else {}
+                )
+                device = devices.get(mac)
+                if not device or not device.get("active"):
+                    tracker_entity = hass.states.get(entity_id)
+                    if tracker_entity:
+                        attrs = dict(tracker_entity.attributes)
+                        attrs["active"] = False
+                        hass.states.async_set(entity_id, "not_home", attrs)
+
+    # Listen for new devices and mark undetected entities after each scan
+    def _scan_listener():
+        _async_add_entities()
+        _mark_undetected_entities()
+
+    coordinator.async_add_listener(_scan_listener)
 
     # Listen for new devices
     coordinator.async_add_listener(_async_add_entities)
@@ -173,11 +178,17 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
         self._attr_unique_id = f"{entry.entry_id}_{mac.replace(':', '_')}"
         self._attr_name = device_data.get("name") or f"Device {mac}"
 
-        # Set up device info
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._attr_unique_id)},
+        # Device info is provided via property below
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        unique_id = (
+            str(self._attr_unique_id) if self._attr_unique_id is not None else ""
+        )
+        return DeviceInfo(
+            identifiers={(DOMAIN, unique_id)},
             name=self._attr_name,
-            via_device=(DOMAIN, entry.entry_id),
+            via_device=(DOMAIN, self._entry.entry_id),
         )
 
     @property
