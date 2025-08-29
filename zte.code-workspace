@@ -1,32 +1,22 @@
 {
-	"folders": [
-		{
-			"path": "."
-		}
-	],
-	"settings": {
-		"files.associations": {
-			"*.yaml": "yaml",
-			"*.yml": "yaml"
-		},
-		"yaml.schemas": {
-			"https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/helpers/config_validation.py": [
-				"configuration.yaml",
-				"*.yaml"
-			]
-		}
+  "folders": [
+	{
+		"path": "."
 	},
-	"extensions": {
-		"recommendations": [
-			"ms-python.python",
-			"ms-python.vscode-pylance",
-			"ms-python.black-formatter",
-			"ms-python.isort",
-			"ms-python.flake8",
-			"redhat.vscode-yaml",
-			"esbenp.prettier-vscode",
-			"github.vscode-pull-request-github",
-			"ryanluker.vscode-coverage-gutters"
-		]
+	{
+		"path": "../homeassistant-core"
 	}
+],
+  "settings": {
+    "yaml.schemas": {
+      "https://raw.githubusercontent.com/home-assistant/core/dev/homeassistant/helpers/config_validation.py": [
+        "configuration.yaml",
+        "*.yaml"
+      ]
+    },
+    "files.associations": {
+      "*.yaml": "yaml",
+      "*.yml": "yaml"
+    }
+  }
 }

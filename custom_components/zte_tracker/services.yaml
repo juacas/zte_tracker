@@ -1,0 +1,23 @@
+# Service definitions for ZTE Tracker integration
+
+reboot:
+  name: Reboot ZTE Router
+  description: Reboots the ZTE router.
+  fields:
+    host:
+      name: Host
+      description: IP address or hostname of the router
+      required: true
+      selector:
+        text: {}
+
+remove_tracked_entity:
+  name: Remove Tracked Device Entity
+  description: Removes a tracked device entity by MAC address.
+  fields:
+    mac:
+      name: MAC Address
+      description: MAC address of the device to remove
+      required: true
+      selector:
+        text: {}
