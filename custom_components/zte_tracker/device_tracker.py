@@ -182,12 +182,9 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        unique_id = (
-            str(self._attr_unique_id) if self._attr_unique_id is not None else ""
-        )
+        # All tracker entities reference the router device
         return DeviceInfo(
-            identifiers={(DOMAIN, unique_id)},
-            name=self._attr_name,
+            identifiers={(DOMAIN, self._entry.entry_id)},
             via_device=(DOMAIN, self._entry.entry_id),
         )
 
@@ -234,8 +231,17 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
         data = self.coordinator.data or {}
         devices = data.get("devices", {})
         device = devices.get(self._mac, {})
+        network_type = device.get("network_type")
         icon_type = device.get("icon_type")
-        return ICONS.get(icon_type) if icon_type else "mdi:devices"
+        # Prefer network_type for icon selection
+        if network_type == "LAN":
+            return "mdi:lan"
+        elif network_type == "WLAN":
+            return "mdi:wifi"
+        # Fallback to icon_type if available
+        if icon_type:
+            return ICONS.get(icon_type, "mdi:devices")
+        return "mdi:devices"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

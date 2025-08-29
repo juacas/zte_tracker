@@ -208,6 +208,9 @@ class zteClient:
             if self.login_data.get("lockingTime", 0) == -1:
                 self.statusmsg = f"Router is locked: {self.login_data.get('loginErrMsg', 'Unknown error')}"
                 return False
+            if self.login_data.get("lockingTime", 0) > 0:
+                self.statusmsg = f"Router is locked for {self.login_data.get('lockingTime', 0)} seconds: Too many login errors."
+                return False
 
             # Detect login denied due to bad username or password
             if (
