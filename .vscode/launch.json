@@ -1,76 +1,55 @@
 {
-    "version": "0.2.0",
-    "configurations": [
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Iniciar Home Assistant Core",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "homeassistant",
+      // "program": "${workspaceFolder}/venv/bin/python",
+      "args": [
+        // "-m",
+        // "homeassistant",
+        "--config",
+        "/workspaces/homeassistant-core"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Tests de Pytest",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "tests",
+        "--maxfail=3",
+        "--disable-warnings",
+        "-v"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Adjuntar al depurador",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "localhost",
+        "port": 5678
+      },
+      "pathMappings": [
         {
-            "name": "Home Assistant",
-            "type": "python",
-            "request": "launch",
-            "program": "/usr/src/homeassistant/homeassistant/__main__.py",
-            "args": [
-                "--config",
-                "/config"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "/usr/src/homeassistant:/config/custom_components"
-            }
-        },
-        {
-            "name": "Home Assistant (Skip Dependencies)",
-            "type": "python",
-            "request": "launch",
-            "program": "/usr/src/homeassistant/homeassistant/__main__.py",
-            "args": [
-                "--config",
-                "/config",
-                "--skip-pip"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "/usr/src/homeassistant:/config/custom_components"
-            }
-        },
-        {
-            "name": "Python: Test ZTE Tracker",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/tests/test_client.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "TEST_PASSWORD": "testpass",
-                "TEST_USERNAME": "user",
-                "TEST_HOST": "localhost",
-                "PYTHONPATH": "${workspaceFolder}/custom_components"
-            }
-        },
-        {
-            "name": "Python: Run Tests",
-            "type": "python",
-            "request": "launch",
-            "module": "pytest",
-            "args": [
-                "${workspaceFolder}/tests",
-                "-v"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}/custom_components"
-            }
-        },
-        {
-            "name": "Python: Debug Current File",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}/custom_components"
-            }
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "/workspaces/home-assistant-core"
         }
-    ]
+      ]
+    }
+  ]
 }

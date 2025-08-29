@@ -1,11 +1,12 @@
 """Constants for zte_tracker."""
+
 # Base component constants
 from homeassistant.const import Platform
 
 DOMAIN = "zte_tracker"
 DOMAIN_DATA = f"{DOMAIN}_data"
 VERSION = "1.3.12"
-PLATFORMS = [Platform.SENSOR, Platform.DEVICE_TRACKER]
+PLATFORMS = [Platform.SENSOR, Platform.DEVICE_TRACKER, Platform.SWITCH]
 ISSUE_URL = "https://github.com/juacas/zte_tracker/issues"
 DEFAULT_HOST = "192.168.1.1"
 DEFAULT_USERNAME = "admin"

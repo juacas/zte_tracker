@@ -1,4 +1,5 @@
 """Sensor platform for ZTE Tracker."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,7 +8,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -22,11 +23,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up ZTE sensor from config entry."""
     coordinator: ZteDataCoordinator = hass.data[DOMAIN][entry.entry_id]
-    
-    async_add_entities([
-        ZteRouterSensor(coordinator, entry),
-        ZteDeviceCountSensor(coordinator, entry),
-    ])
+
+    async_add_entities(
+        [
+            ZteRouterSensor(coordinator, entry),
+            ZteDeviceCountSensor(coordinator, entry),
+        ]
+    )
 
 
 class ZteBaseSensor(CoordinatorEntity, SensorEntity):
@@ -58,27 +61,16 @@ class ZteRouterSensor(ZteBaseSensor):
     @property
     def native_value(self) -> str:
         """Return the state of the sensor."""
-        if self.coordinator.paused:
-            return "paused"
-        return "on" if self.coordinator.available else "unavailable"
+        data = self.coordinator.data or {}
+        router_info = data.get("router_info", {})
+        return router_info.get("status", "unknown")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         data = self.coordinator.data or {}
-        devices = data.get("devices", {})
         router_info = data.get("router_info", {})
-        
-        # Format device list for backward compatibility
-        device_list = []
-        for mac, device in devices.items():
-            if device.get("active"):
-                device_list.append(f"{mac}({device.get('name', 'Unknown')}-{device.get('ip', '')})")
-        
         return {
-            "scanning": not self.coordinator.paused and self.coordinator.available,
-            "devices": device_list,
-            "num_devices": len([d for d in devices.values() if d.get("active")]),
             "host": router_info.get("host"),
             "model": router_info.get("model"),
             "status": router_info.get("status"),
@@ -103,3 +95,17 @@ class ZteDeviceCountSensor(ZteBaseSensor):
         data = self.coordinator.data or {}
         devices = data.get("devices", {})
         return len([d for d in devices.values() if d.get("active")])
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes, including the list of detected devices."""
+        data = self.coordinator.data or {}
+        devices = data.get("devices", {})
+        device_list = [
+            f"{mac}({device.get('name', 'Unknown')}-{device.get('ip', '')})"
+            for mac, device in devices.items()
+        ]
+        return {
+            "devices": device_list,
+            "num_devices": len([d for d in devices.values() if d.get("active")]),
+        }
