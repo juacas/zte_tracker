@@ -43,6 +43,7 @@ _MODELS["F6645P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
 _MODELS["H6645P"] = _MODELS["H288A"]
 _MODELS["H3640"] = _MODELS["H288A"]
+_MODELS["BE5100"] = _MODELS["F6640"]  # Chinese model, use root username
 
 
 class zteClient:

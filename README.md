@@ -58,8 +58,11 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 | ZTE H3600P    |     H3600P      |    ✅    |
 | ZTE H3640 V10 |      H3640      |    ✅    |
 | ZTE H6645P V2 |     H6645P      |    ✅    |
+| ZTE BE5100    |      BE5100     |    ✅    |
 
 > **Note**: This integration may work with additional ZTE router models. Try one of the above parameter values to test compatibility.
+> 
+> **Chinese Models**: For Chinese ZTE router models (like BE5100), use `root` as the username instead of `admin`.
 
 ## 🚀 Installation
 
@@ -86,7 +89,7 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 3. Search for "ZTE Tracker"
 4. Enter your router details:
    - **Host**: Router IP address (usually `192.168.1.1` or `192.168.0.1`)
-   - **Username**: Router admin username (usually `admin`)
+   - **Username**: Router admin username (usually `admin`, or `root` for Chinese models)
    - **Password**: Router admin password
    - **Model**: Select your router model from the dropdown
 
@@ -182,6 +185,7 @@ This ensures your automations continue working even during brief connectivity is
 
 - Verify the IP address is correct
 - Check that the username/password are valid
+- For Chinese models (like BE5100), try using `root` instead of `admin` as username
 - Ensure the router's web interface is accessible
 - Try accessing the router's web interface manually first
 
@@ -250,6 +254,7 @@ pytest custom_components/zte_tracker/tests/
 - **@onegambler** for H3600P verification
 - **@lapo** for H6645P verification
 - **@309631** for H3640 verification
+- **Chinese ZTE community** for BE5100 verification and username guidance
 
 ## 📄 License
 
