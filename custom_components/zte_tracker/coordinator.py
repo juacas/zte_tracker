@@ -175,7 +175,9 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                     return None
 
                 devices = self.client.get_devices_response()
-                return devices
+                wanstatus = self.client.get_wan_status()
+
+                return devices, wanstatus
             except Exception as ex:
                 _LOGGER.error("Error fetching device data: %s", ex)
                 return None
@@ -185,7 +187,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 except Exception:
                     pass
 
-        devices = await self.hass.async_add_executor_job(_fetch_devices)
+        devices, wanstatus = await self.hass.async_add_executor_job(_fetch_devices)
 
         if devices is None:
             self._available = False
@@ -213,14 +215,16 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         active_count = len([d for d in processed_devices.values() if d.get("active")])
         self._adjust_update_interval(active_count)
 
+        router_info = {
+            "host": self.client.host,
+            "model": self.client.model,
+            "status": "connected",
+            "last_update": self._last_successful_update.isoformat(),
+            "active_devices": active_count,
+            "total_devices": len(processed_devices),
+        }
+        router_info.update(wanstatus)
         return {
             "devices": processed_devices,
-            "router_info": {
-                "host": self.client.host,
-                "model": self.client.model,
-                "status": "connected",
-                "last_update": self._last_successful_update.isoformat(),
-                "active_devices": active_count,
-                "total_devices": len(processed_devices),
-            }
+            "router_info": router_info,
         }

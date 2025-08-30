@@ -26,9 +26,9 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 
 ### Router Management
 
-- **Router status monitoring** with connection health indicators
-- **Remote router reboot** capability through service calls (Unimplemented)
-- **Pause/resume scanning** to allow administrative access to router
+- **Router status monitoring** with connection health indicators: WAN uptime, WAN_remain_leasetime, WAN_error_message, WAN_connected (kindly requested by @cagnulein)
+- **Remote router reboot** capability through service calls (Unimplemented. Work in progress.)
+- **Pause/resume scanning** to allow administrative access to router from other browsers
 - **Real-time statistics** including device counts and connection status
 
 ### Performance & Reliability
@@ -43,7 +43,8 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 - **Config Flow support** - easy setup through the UI
 - **Device Registry integration** - proper device tracking with unique identifiers
 - **DataUpdateCoordinator** - efficient data management following HA best practices
-- **Backward compatibility** - supports existing YAML configurations with deprecation warnings
+- **Backward compatibility** - need to remove legacy YAML configuration
+- **HACS support** - easy installation and updates via Home Assistant Community Store
 
 ## 🔧 Compatible Routers
 
@@ -108,7 +109,7 @@ zte_tracker:
 - **Router Status Sensor** (`sensor.zte_router_[ip]`)
 
   - State: `on`, `paused`, or `unavailable`
-  - Attributes: device list, scanning status, router info
+  - Attributes: device list, scanning status, last update time, WAN uptime, WAN_remain_leasetime, WAN_error_message, WAN_connected
 
 - **Device Count Sensor** (`sensor.zte_router_[ip]_connected_devices`)
   - State: Number of connected devices
@@ -118,7 +119,7 @@ zte_tracker:
 
 - **Individual Device Trackers** (`device_tracker.zte_[mac_address]`)
   - State: `home` or `not_home`
-  - Attributes: IP address, hostname, network type, device icon
+  - Attributes: IP address, hostname, network type (WLAN/LAN), device icon, last seen time, port (SSID name or LAN port), link duration, connect time.
 
 ## 🎯 Services
 

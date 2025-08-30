@@ -74,6 +74,10 @@ class ZteRouterSensor(ZteBaseSensor):
             "host": router_info.get("host"),
             "model": router_info.get("model"),
             "status": router_info.get("status"),
+            "WAN_uptime": router_info.get("WANUptime"),
+            "WAN_remain_leasetime": router_info.get("RemainLeaseTime"),
+            "WAN_error_message": router_info.get("WANError"),
+            "WAN_connected": router_info.get("Connected"),
             "last_update": datetime.now().isoformat(),
         }
 

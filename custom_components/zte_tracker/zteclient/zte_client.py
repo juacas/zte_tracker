@@ -375,6 +375,55 @@ class zteClient:
             _LOGGER.error(self.statusmsg)
             return None
 
+    def get_wan_status(self) -> dict[str, Any]:
+        """Fetch WAN status and return relevant attributes."""
+        wan_attrs = {}
+        try:
+            # # Fetch MenuView first.
+            url = f"https://{self.host}/?_type=menuView&_tag=ethWanStatus&Menu3Location=0&_={self.get_guid()}"
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            # Fetch MenuData.
+            url = f"https://{self.host}/?_type=menuData&_tag=wan_internetstatus_lua.lua&TypeUplink=2&pageType=1&_={self.get_guid()}"
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            self.log_request(r)
+            xml = ET.fromstring(r.text)
+            instances = xml.findall("ID_WAN_COMFIG/Instance")
+            # Check error in response.
+            error_str = xml.findtext("IF_ERRORSTR")
+            if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
+                _LOGGER.error("Router error: %s", error_str)
+                raise Exception(f"Router error: {error_str}")
+
+            wan_node = None
+            for inst in instances:
+                for i in range(0, len(inst) // 2):
+                    pname = inst[i * 2].text
+                    pvalue = inst[i * 2 + 1].text
+                    if pname == "WANCName" and pvalue == "WAN_internet":
+                        wan_node = inst
+                        break
+                if wan_node:
+                    break
+            if not wan_node and instances:
+                wan_node = instances[0]
+            if wan_node:
+                for i in range(0, len(wan_node) // 2):
+                    pname = wan_node[i * 2].text
+                    pvalue = wan_node[i * 2 + 1].text
+                    if pname == "UpTime":
+                        wan_attrs["WANUptime"] = pvalue
+                    elif pname == "ConnError":
+                        wan_attrs["WANError"] = pvalue
+                    elif pname == "RemainLeaseTime":
+                        wan_attrs["RemainLeaseTime"] = pvalue
+                    elif pname == "ConnStatus":
+                        wan_attrs["Connected"] = (pvalue == "Connected")
+        except Exception as ex:
+            _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
+        return wan_attrs
+
     def log_request(self, r):
         _LOGGER.debug(
             "Request %d URL: %s Headers: %s",
@@ -447,7 +496,6 @@ class zteClient:
                         "Unexpected device XML structure, child count: %d", child_count
                     )
                     continue
-
 
                 for i in range(0, child_count // 2):
                     try:
