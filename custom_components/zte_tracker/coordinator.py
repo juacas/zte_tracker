@@ -170,9 +170,8 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             """Fetch router data in executor."""
             try:
                 if not self.client.login():
-                    _LOGGER.warning("Login failed: %s@%s",
-                                   self.client.username, self.client.host)
-                    return None
+                    _LOGGER.warning("Login failed: %s@%s", self.client.username, self.client.host)
+                    return None, None, None
 
                 devices = self.client.get_devices_response()
                 wanstatus = self.client.get_wan_status()
@@ -192,20 +191,23 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
         if devices is None:
             self._available = False
+            devicesItem = {}
             # Return cached data on failure if we have it and it's recent
             if (self._device_cache and self._last_successful_update and
                 datetime.now() - self._last_successful_update < timedelta(minutes=10)):
                 _LOGGER.warning("Using cached data due to connection failure")
-                return {
-                    "devices": {mac: data.copy() for mac, data in self._device_cache.items()},
+                devicesItem = {mac: data.copy() for mac, data in self._device_cache.items()}
+
+            return {
+                    "devices": devicesItem,
                     "router_info": {
                         "host": self.client.host,
                         "model": self.client.model,
                         "status": "unavailable",
                     },
                 }
-            raise UpdateFailed("Failed to communicate with router")
 
+        # Have info to return. Tracker is working.
         self._available = True
         self._last_successful_update = datetime.now()
 
