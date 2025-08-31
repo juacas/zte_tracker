@@ -155,6 +155,22 @@ async def async_setup_entry(
         schema=REMOVE_TRACKED_ENTITY_SCHEMA,
     )
 
+    async def async_remove_unidentified_entities_service(call):
+        """
+        Service to remove all device_tracker entities for this integration that have no unique_id.
+        """
+        removed = remove_unidentified_device_tracker_entities(hass)
+        _LOGGER.info(
+            "Service remove_unidentified_entities called. Entities removed: %s", removed
+        )
+
+    # Register service to remove unidentified device_tracker entities
+    hass.services.async_register(
+        DOMAIN,
+        "Remove Devicetracker Entities with no Unique ID (Debug)",
+        async_remove_unidentified_entities_service,
+    )
+
 
 class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
     """Representation of a ZTE tracked device."""
@@ -264,3 +280,28 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
         """When entity is added to hass."""
         await super().async_added_to_hass()
         _LOGGER.debug("Added device tracker for MAC: %s", self._mac)
+
+
+def remove_unidentified_device_tracker_entities(hass: HomeAssistant) -> int:
+    """
+    Remove all device_tracker entities for this integration that have no unique_id.
+
+    Returns the number of entities removed.
+    Only for debugging.
+    """
+    entity_registry = er.async_get(hass)
+    removed = 0
+    for entity_id, entity in entity_registry.entities.items():
+        if (
+            entity.domain == "device_tracker"
+            # and entity.platform == DOMAIN
+            and not entity.unique_id
+        ):
+            entity_registry.async_remove(entity_id)
+            _LOGGER.info("Removed unidentified device_tracker entity: %s", entity_id)
+            removed += 1
+    if removed == 0:
+        _LOGGER.info("No unidentified device_tracker entities found to remove.")
+    else:
+        _LOGGER.info("Removed %d unidentified device_tracker entities.", removed)
+    return removed

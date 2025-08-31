@@ -27,9 +27,10 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 ### Router Management
 
 - **Router status monitoring** with connection health indicators: WAN uptime, WAN_remain_leasetime, WAN_error_message, WAN_connected (kindly requested by @cagnulein)
-- **Remote router reboot** capability through service calls (Unimplemented. Work in progress.)
+- **Remote router reboot** capability through service calls (**Now implemented!**)
 - **Pause/resume scanning** to allow administrative access to router from other browsers
 - **Real-time statistics** including device counts and connection status
+- **Router details available as sensor attributes** (model, firmware, uptime, WAN info, etc.)
 
 ### Performance & Reliability
 
@@ -45,6 +46,68 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 - **DataUpdateCoordinator** - efficient data management following HA best practices
 - **Backward compatibility** - need to remove legacy YAML configuration
 - **HACS support** - easy installation and updates via Home Assistant Community Store
+
+## 📊 Entities Created
+
+### Sensors
+
+- **Router Status Sensor** (`sensor.zte_router_[ip]`)
+
+  - State: `on`, `paused`, or `unavailable`
+  - Attributes:
+    - device list
+    - scanning status
+    - last update time
+    - WAN uptime
+    - WAN_remain_leasetime
+    - WAN_error_message
+    - WAN_connected
+    - **Router details**: model, firmware version, uptime, MAC address, IP address, Memory usage, CPU usage, etc.
+
+- **Device Count Sensor** (`sensor.zte_router_[ip]_connected_devices`)
+  - State: Number of connected devices
+  - Attributes: list of devices detected.
+
+### Device Trackers
+
+- **Individual Device Trackers** (`device_tracker.zte_[mac_address]`)
+  - State: `home` or `not_home`
+  - Attributes: IP address, hostname, network type (WLAN/LAN), device icon, last seen time, port (SSID name or LAN port), link duration, connect time.
+
+## 🎯 Services
+
+### `zte_tracker.reboot`
+
+Remotely reboots the router (supported by most router models).
+
+**Example usage:**
+
+```yaml
+service: zte_tracker.reboot
+```
+
+### `zte_tracker.remove_tracked_entity`
+
+Removes a tracked device entity by MAC address.
+
+**Service data schema:**
+
+- `mac` (string, required): MAC address of the device to remove. Example: `E4:BC:AA:0D:B8:F6`
+
+**Example usage:**
+
+```yaml
+service: zte_tracker.remove_tracked_entity
+data:
+  mac: E4:BC:AA:0D:B8:F6
+```
+
+## 🕹️ Pause/Resume Tracker
+
+To pause or resume the tracker, use the ZTE Tracker Pause switch in the Home Assistant UI. This is useful when you need to access the router's web interface without interference.
+
+- Entity: `switch.zte_tracker_pause`
+- State: `on` (paused), `off` (running)
 
 ## 🔧 Compatible Routers
 
@@ -101,58 +164,6 @@ zte_tracker:
   username: admin
   password: !secret zte_password
 ```
-
-## 📊 Entities Created
-
-### Sensors
-
-- **Router Status Sensor** (`sensor.zte_router_[ip]`)
-
-  - State: `on`, `paused`, or `unavailable`
-  - Attributes: device list, scanning status, last update time, WAN uptime, WAN_remain_leasetime, WAN_error_message, WAN_connected
-
-- **Device Count Sensor** (`sensor.zte_router_[ip]_connected_devices`)
-  - State: Number of connected devices
-  - Unit: devices
-
-### Device Trackers
-
-- **Individual Device Trackers** (`device_tracker.zte_[mac_address]`)
-  - State: `home` or `not_home`
-  - Attributes: IP address, hostname, network type (WLAN/LAN), device icon, last seen time, port (SSID name or LAN port), link duration, connect time.
-
-## 🎯 Services
-
-### `zte_tracker.reboot`
-
-Remotely reboots the router (when supported by the router model, currently unimplemented).
-
-```yaml
-service: zte_tracker.reboot
-```
-
-### `zte_tracker.remove_tracked_entity`
-
-Removes a tracked device entity by MAC address.
-
-**Service data schema:**
-
-- `mac` (string, required): MAC address of the device to remove. Example: `E4:BC:AA:0D:B8:F6`
-
-**Example usage:**
-
-```yaml
-service: zte_tracker.remove_tracked_entity
-data:
-  mac: E4:BC:AA:0D:B8:F6
-```
-
-## 🕹️ Pause/Resume Tracker
-
-To pause or resume the tracker, use the ZTE Tracker Pause switch in the Home Assistant UI. This is useful when you need to access the router's web interface without interference.
-
-- Entity: `switch.zte_tracker_pause`
-- State: `on` (paused), `off` (running)
 
 ## 🔍 Advanced Configuration
 

@@ -166,8 +166,8 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 },
             }
 
-        def _fetch_devices():
-            """Fetch devices in executor."""
+        def _fetch_router_data() -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None, dict[str, Any] | None]:
+            """Fetch router data in executor."""
             try:
                 if not self.client.login():
                     _LOGGER.warning("Login failed: %s@%s",
@@ -176,18 +176,19 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
                 devices = self.client.get_devices_response()
                 wanstatus = self.client.get_wan_status()
+                routerdetails = self.client.get_router_details()
 
-                return devices, wanstatus
+                return devices, wanstatus, routerdetails
             except Exception as ex:
                 _LOGGER.error("Error fetching device data: %s", ex)
-                return None
+                return None, None, None
             finally:
                 try:
                     self.client.logout()
                 except Exception:
                     pass
 
-        devices, wanstatus = await self.hass.async_add_executor_job(_fetch_devices)
+        devices, wanstatus, routerdetails = await self.hass.async_add_executor_job(_fetch_router_data)
 
         if devices is None:
             self._available = False
@@ -223,7 +224,10 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             "active_devices": active_count,
             "total_devices": len(processed_devices),
         }
-        router_info.update(wanstatus)
+        if wanstatus:
+            router_info.update(wanstatus)
+        if routerdetails:
+            router_info.update(routerdetails)
         return {
             "devices": processed_devices,
             "router_info": router_info,

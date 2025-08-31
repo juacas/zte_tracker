@@ -9,7 +9,7 @@ source venv/bin/activate
 pip install --upgrade pip wheel
 
 # Instalar Home Assistant Core en modo desarrollo
-pip install -r tests/requirements_test_all.txt
+pip install -r tests/requirements_test.txt
 cp tests/configuration_test.yaml /workspaces/homeassistant-core/configuration.yaml
 
 # Mensaje de bienvenida

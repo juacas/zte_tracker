@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as ha_dt
 
 from .const import DOMAIN, ICON
 from .coordinator import ZteDataCoordinator
@@ -70,16 +71,9 @@ class ZteRouterSensor(ZteBaseSensor):
         """Return the state attributes."""
         data = self.coordinator.data or {}
         router_info = data.get("router_info", {})
-        return {
-            "host": router_info.get("host"),
-            "model": router_info.get("model"),
-            "status": router_info.get("status"),
-            "WAN_uptime": router_info.get("WANUptime"),
-            "WAN_remain_leasetime": router_info.get("RemainLeaseTime"),
-            "WAN_error_message": router_info.get("WANError"),
-            "WAN_connected": router_info.get("Connected"),
-            "last_update": datetime.now().isoformat(),
-        }
+        # Get local time in local timezone.
+        router_info["last_update"] = ha_dt.now().isoformat()
+        return router_info
 
 
 class ZteDeviceCountSensor(ZteBaseSensor):

@@ -1,7 +1,9 @@
 from __future__ import annotations
+from os import error
 
 """ZTE router client with improved security and error handling."""
 
+import base64
 import hashlib
 import logging
 import time
@@ -9,6 +11,8 @@ from typing import Any
 import warnings
 import xml.etree.ElementTree as ET
 
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 import requests
 from requests import Session
 from requests.adapters import HTTPAdapter
@@ -97,27 +101,17 @@ class zteClient:
                 "DNT": "1",
             }
         )
-
-        self.session.cookies.set("_TESTCOOKIESUPPORT", "1")
-
-    def reboot(self) -> bool:
-        """Reboot the router."""
-        try:
-            # Note: Reboot functionality needs to be implemented based on router model
-            raise NotImplementedError("Reboot functionality not yet implemented")
-            if not self.login():
-                return False
-
-            _LOGGER.info("Requesting router reboot")
-        except Exception as e:
-            _LOGGER.error("Failed to reboot: %s", e)
-            return False
-        finally:
-            self.logout()
+        # self.session.cookies.set("_TESTCOOKIESUPPORT", "1")
 
     def login(self) -> bool:
         """Login procedure using ZTE challenge. Returns True if successful, False otherwise. Sets statusmsg for error reporting."""
         try:
+            # Check if we are logged in already.
+            if self.login_data is not None and self.session is not None:
+                if self.login_data.get("login_need_refresh") == 0:
+                    _LOGGER.debug("Already logged in, no need to refresh.")
+                    return True
+
             self._setup_session()
             # Step1: Get session token
             try:
@@ -265,6 +259,7 @@ class zteClient:
     def logout(self) -> None:
         """Logout from router."""
         try:
+            # Check if we are logged in.
             if self.login_data is None or not self.session:
                 return
 
@@ -375,6 +370,59 @@ class zteClient:
             _LOGGER.error(self.statusmsg)
             return None
 
+    def get_router_details(self) -> dict[str, Any] | None:
+        """Get router details."""
+        try:
+            if not self.session:
+                raise RuntimeError("Session not initialized")
+
+            # call first: https://10.0.0.1/?_type=menuView&_tag=statusMgr&Menu3Location=0&_=1756620757061
+            url = f"https://{self.host}/?_type=menuView&_tag=statusMgr&Menu3Location=0&_={self.get_guid()}"
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            self.log_request(r)
+
+            url = f"https://{self.host}/?_type=menuData&_tag=devmgr_statusmgr_lua.lua&_={self.get_guid()}"
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            self.log_request(r)
+            # Router details.
+            router_details = {}
+
+            # Parse XML response (see routers/RouterDetail.md)
+            xml = ET.fromstring(r.text)
+
+            # node OBJ_CPUMEMUSAGE_ID has CpuUsage1 to CpuUsage4, MemUsage.
+            cpu_node = xml.find("OBJ_CPUMEMUSAGE_ID/Instance")
+            if cpu_node:
+                # ElementTree elements do not provide getnext(), so iterate children in pairs:
+                children = list(cpu_node)
+                for i in range(0, len(children), 2):
+                    name_elem = children[i]
+                    value_elem = children[i + 1] if i + 1 < len(children) else None
+                    pname = name_elem.text if name_elem is not None else None
+                    pvalue = value_elem.text if value_elem is not None else None
+                    if pname and pvalue and pname != "_InstID":
+                        router_details[pname] = pvalue
+            # node OBJ_POWERONTIME_ID has PowerOnTime.
+            power_node = xml.find("OBJ_POWERONTIME_ID/Instance")
+            if power_node:
+                # ElementTree elements do not provide getnext(), so iterate children in pairs:
+                children = list(power_node)
+                for i in range(0, len(children), 2):
+                    name_elem = children[i]
+                    value_elem = children[i + 1] if i + 1 < len(children) else None
+                    pname = name_elem.text if name_elem is not None else None
+                    pvalue = value_elem.text if value_elem is not None else None
+                    if pname and pvalue and pname != "_InstID":
+                        router_details[pname] = pvalue
+
+            return router_details
+
+        except Exception as e:
+            _LOGGER.error("Error fetching router details: %s", e)
+            return None
+
     def get_wan_status(self) -> dict[str, Any]:
         """Fetch WAN status and return relevant attributes."""
         wan_attrs = {}
@@ -413,18 +461,23 @@ class zteClient:
                     pname = wan_node[i * 2].text
                     pvalue = wan_node[i * 2 + 1].text
                     if pname == "UpTime":
-                        wan_attrs["WANUptime"] = pvalue
+                        wan_attrs["WAN_uptime"] = pvalue
                     elif pname == "ConnError":
-                        wan_attrs["WANError"] = pvalue
+                        wan_attrs["WAN_error_message"] = pvalue
                     elif pname == "RemainLeaseTime":
-                        wan_attrs["RemainLeaseTime"] = pvalue
+                        wan_attrs["WAN_remain_leasetime"] = pvalue
                     elif pname == "ConnStatus":
-                        wan_attrs["Connected"] = (pvalue == "Connected")
+                        wan_attrs["WAN_connected"] = pvalue == "Connected"
         except Exception as ex:
             _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
         return wan_attrs
 
     def log_request(self, r):
+        # Get cookie value for debugging.
+        if not r or not r.request:
+            return
+        #sid = self.session.cookies.get('SID_HTTPS_')
+
         _LOGGER.debug(
             "Request %d URL: %s Headers: %s",
             r.status_code,
@@ -549,3 +602,70 @@ class zteClient:
 
         _LOGGER.debug("Parsed %d valid devices", len(devices))
         return devices
+
+    def reboot(self) -> bool:
+        """Reboot the router using the secure endpoint."""
+        try:
+            if not self.login():
+                _LOGGER.error("Login failed: %s", self.statusmsg)
+                return False
+
+            # First load menuView url https://10.0.0.1/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_=1756621946066
+            menu_view_url = f"https://{self.host}/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_={self.get_guid()}"
+            r = self.session.get(menu_view_url, verify=self.verify_ssl, timeout=30)
+            self.log_request(r)
+            r.raise_for_status()
+
+            # Now prepare the reboot request.
+            session_token = self.get_session_token()
+            if not session_token:
+                self.statusmsg = "Session token missing after login"
+                _LOGGER.error(self.statusmsg)
+                return False
+
+            post_data = f"IF_ACTION=Restart&Btn_restart=&_sessionTOKEN={session_token}"
+            digest_str = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
+
+            pub_key_pem = (
+                "-----BEGIN PUBLIC KEY-----\n"
+                "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAodPTerkUVCYmv28SOfRV\n"
+                "7UKHVujx/HjCUTAWy9l0L5H0JV0LfDudTdMNPEKloZsNam3YrtEnq6jqMLJV4ASb\n"
+                "1d6axmIgJ636wyTUS99gj4BKs6bQSTUSE8h/QkUYv4gEIt3saMS0pZpd90y6+B/9\n"
+                "hZxZE/RKU8e+zgRqp1/762TB7vcjtjOwXRDEL0w71Jk9i8VUQ59MR1Uj5E8X3WIc\n"
+                "fYSK5RWBkMhfaTRM6ozS9Bqhi40xlSOb3GBxCmliCifOJNLoO9kFoWgAIw5hkSIb\n"
+                "GH+4Csop9Uy8VvmmB+B3ubFLN35qIa5OG5+SDXn4L7FeAA5lRiGxRi8tsWrtew8w\n"
+                "nwIDAQAB\n"
+                "-----END PUBLIC KEY-----"
+            )
+            public_key = serialization.load_pem_public_key(pub_key_pem.encode("utf-8"))
+            encrypted_digest = public_key.encrypt(
+                digest_str.encode("utf-8"), padding.PKCS1v15()
+            )
+            check_header = base64.b64encode(encrypted_digest).decode("utf-8")
+
+            headers = {
+                "Check": check_header,
+                "Content-Type": "application/x-www-form-urlencoded",
+            }
+
+            url = f"https://{self.host}/?_type=menuData&_tag=devmgr_restartmgr_lua.lua&_={self.get_guid()}"
+            r = self.session.post(
+                url, data=post_data, headers=headers, verify=self.verify_ssl, timeout=30
+            )
+            self.log_request(r)
+            r.raise_for_status()
+            # Check error in response.
+            xml = ET.fromstring(r.content)
+            error_str = xml.findtext("IF_ERRORSTR")
+            if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
+                _LOGGER.error("Router error: %s", error_str)
+                raise Exception(f"Router error: {error_str}")
+
+            self.statusmsg = "Reboot command sent successfully."
+            return True
+        except Exception as e:
+            self.statusmsg = f"Failed to reboot: {e}"
+            _LOGGER.error(self.statusmsg)
+            return False
+        finally:
+            self.logout()
