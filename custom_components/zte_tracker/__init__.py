@@ -10,7 +10,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.exceptions import HomeAssistantError
+
 import voluptuous as vol
 
 from .const import DOMAIN, PLATFORMS
@@ -64,23 +67,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up all platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register services
-    async def async_handle_reboot(call: ServiceCall) -> None:
-        """Handle the reboot service call."""
-        success = await coordinator.async_reboot_router()
-        statusmsg = getattr(coordinator.client, "statusmsg", None)
-        if success:
-            hass.states.async_set(f"{DOMAIN}.last_reboot", datetime.now().isoformat())
-            _LOGGER.info("Router reboot initiated successfully")
-        else:
-            msg = statusmsg if statusmsg else "Failed to initiate router reboot"
-            _LOGGER.error(f"Router reboot failed: {msg}")
-            raise Exception(msg)
-
-    # Register services only if not already registered
-    if not hass.services.has_service(DOMAIN, "reboot"):
-        hass.services.async_register(DOMAIN, "reboot", async_handle_reboot)
-        _LOGGER.debug("Registered service: %s.reboot", DOMAIN)
+    # Register all services
+    setup_services(hass)
 
     return True
 
@@ -97,3 +85,105 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry."""
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)
+
+
+REBOOT_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("host"): vol.Coerce(str),
+    }
+)
+
+REMOVE_TRACKED_ENTITY_SCHEMA = vol.Schema(
+    {
+        vol.Required("mac"): cv.string,
+    }
+)
+
+REMOVE_UNIDENTIFIED_SERVICE_SCHEMA = vol.Schema({})
+
+
+async def async_reboot_service(call: ServiceCall):
+    """Reboot router(s) for the specified host, or all if not specified."""
+    hass = call.hass
+    host = call.data.get("host")
+    rebooted = []
+
+    for entry_id, coordinator in hass.data[DOMAIN].items():
+        client = getattr(coordinator, "client", None)
+        if not client:
+            continue
+        if host:
+            if getattr(client, "host", None) == host:
+                if client.reboot():
+                    rebooted.append(host)
+        else:
+            if client.reboot():
+                rebooted.append(client.host)
+
+    if rebooted:
+        _LOGGER.info("Rebooted routers: %s", ", ".join(rebooted))
+    else:
+        _LOGGER.warning("No routers rebooted. Host: %s", host)
+        raise HomeAssistantError(f"No routers rebooted for host: {host}")
+
+
+async def async_remove_tracked_entity(call: ServiceCall):
+    """Remove a tracked device entity by MAC address."""
+    hass = call.hass
+    mac = call.data.get("mac")
+    if not mac:
+        _LOGGER.error("No MAC address provided for removal.")
+        return
+    # Remove entity using entity registry
+    entity_registry = er.async_get(hass)
+    # Try all entry_ids for robustness
+    removed = False
+    for entry_id in hass.data.get(DOMAIN, {}):
+        unique_id = f"{entry_id}_{mac.replace(':', '_')}"
+        entity_id = entity_registry.async_get_entity_id(
+            "device_tracker", DOMAIN, unique_id
+        )
+        if entity_id:
+            entity_registry.async_remove(entity_id)
+            _LOGGER.info("Removed tracked entity for MAC: %s", mac)
+            removed = True
+    if not removed:
+        _LOGGER.warning("No entity found for MAC: %s", mac)
+        raise HomeAssistantError(f"No entity found for MAC: {mac}")
+
+
+async def async_remove_unidentified_entities_service(call: ServiceCall):
+    """Service to remove all device_tracker entities for this integration that have no unique_id."""
+    hass = call.hass
+    entity_registry = er.async_get(hass)
+    removed = 0
+    for entity_id, entity in entity_registry.entities.items():
+        if entity.domain == "device_tracker" and not entity.unique_id:
+            entity_registry.async_remove(entity_id)
+            _LOGGER.info("Removed unidentified device_tracker entity: %s", entity_id)
+            removed += 1
+    if removed == 0:
+        _LOGGER.info("No unidentified device_tracker entities found to remove.")
+    else:
+        _LOGGER.info("Removed %d unidentified device_tracker entities.", removed)
+
+
+def setup_services(hass):
+    hass.services.async_register(
+        DOMAIN,
+        "reboot",
+        async_reboot_service,
+        schema=REBOOT_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "remove_tracked_entity",
+        async_remove_tracked_entity,
+        schema=REMOVE_TRACKED_ENTITY_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "remove_unidentified_entities",
+        async_remove_unidentified_entities_service,
+        schema=REMOVE_UNIDENTIFIED_SERVICE_SCHEMA,
+    )

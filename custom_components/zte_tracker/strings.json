@@ -30,7 +30,7 @@
         "description": "Update ZTE router configuration",
         "data": {
           "host": "Router IP Address",
-          "username": "Username", 
+          "username": "Username",
           "password": "Password",
           "model": "Router Model"
         }
@@ -38,13 +38,23 @@
     }
   },
   "services": {
-    "pause": {
-      "name": "Pause and resume tracker",
-      "description": "Pause and resume tracker (for allowing to administer the router). Toggle status."
-    },
     "reboot": {
       "name": "Reboot router",
-      "description": "Reboot the ZTE router"
+      "description": "Reboot the ZTE router. Optionally specify a hostname to reboot only that router."
+    },
+    "remove_tracked_entity": {
+      "name": "Remove tracked device",
+      "description": "Remove a tracked device entity by MAC address.",
+      "fields": {
+        "mac": {
+          "name": "MAC Address",
+          "description": "MAC address of the device to remove (e.g. E4:BC:AA:0D:B8:F6)"
+        }
+      }
+    },
+    "remove_unidentified_entities": {
+      "name": "Remove unidentified device_tracker entities",
+      "description": "Remove all device_tracker entities for this integration that have no unique_id."
     }
   }
 }

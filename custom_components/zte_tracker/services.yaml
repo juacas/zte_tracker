@@ -7,7 +7,7 @@ reboot:
     host:
       name: Host
       description: IP address or hostname of the router
-      required: true
+      required: false
       selector:
         text: {}
 
@@ -21,3 +21,7 @@ remove_tracked_entity:
       required: true
       selector:
         text: {}
+
+remove_unidentified_entities:
+  name: Remove Unidentified Device Entities
+  description: Removes all device entities with no unique ID.
