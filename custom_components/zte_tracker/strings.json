@@ -54,7 +54,7 @@
     },
     "remove_unidentified_entities": {
       "name": "Remove unidentified device_tracker entities",
-      "description": "Remove all device_tracker entities for this integration that have no unique_id."
+      "description": "Remove all device_tracker entities that have no unique_id."
     }
   }
 }
