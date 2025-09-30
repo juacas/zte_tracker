@@ -124,6 +124,7 @@ To pause or resume the tracker, use the ZTE Tracker Pause switch in the Home Ass
 | ZTE H3600P    |     H3600P      |    ✅    |
 | ZTE H3640 V10 |      H3640      |    ✅    |
 | ZTE H6645P V2 |     H6645P      |    ✅    |
+| ZTE AX3000    |      E2631      |    ✅    |
 
 > **Note**: This integration may work with additional ZTE router models. Try one of the above parameter values to test compatibility.
 
@@ -367,6 +368,13 @@ Below are the actual URL sequences used by the integration for the most common Z
   `GET https://[router_ip]/?_type=menuData&_tag=accessdev_ssiddev_lua.lua&_=[guid]`
 - **LAN Devices:**
   `GET https://[router_ip]/?_type=menuData&_tag=accessdev_landevs_lua.lua&_=[guid]`
+
+#### **E2631**
+
+- **WiFi Devices:**
+  `GET https://[router_ip]/?_type=vueData&_tag=vue_client_data&_=[guid]`
+- **LAN Devices:**
+  `GET https://[router_ip]/?_type=vueData&_tag=localnet_lan_info_lua&_=[guid]`
 
 > Replace `[router_ip]` with your router's IP (e.g., `192.168.1.1`).
 > `[guid]` is a unique number generated for each request.
