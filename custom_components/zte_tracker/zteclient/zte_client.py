@@ -30,12 +30,30 @@ _MODELS = {
         "wlan_id_element": "OBJ_WLAN_AD_ID",
         "lan_script": "accessdev_landevs_lua.lua",
         "lan_id_element": "OBJ_ACCESSDEV_ID",
+        "type_first_request": "menuView",
+        "type_main_request": "menuData",
+        'tag_wan_status_view': "ethWanStatus&Menu3Location=0",
+        "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
     },
     "H288A": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
         "wlan_id_element": "OBJ_ACCESSDEV_ID",
         "lan_script": "accessdev_landevs_lua.lua",
         "lan_id_element": "OBJ_ACCESSDEV_ID",
+        "type_first_request": "menuView",
+        "type_main_request": "menuData",
+        'tag_wan_status_view': "ethWanStatus&Menu3Location=0",
+        "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
+    },
+    "E2631": {
+        "wlan_script": "vue_client_data",
+        "wlan_id_element": "OBJ_CLIENTS_ID",
+        "lan_script": "localnet_lan_info_lua",
+        "lan_id_element": "OBJ_LAN_INFO_ID",
+        "type_first_request": "vueData",
+        "type_main_request": "vueData",
+        "tag_wan_status_view": "vue_home_device_data_no_update_sess",
+        "tag_wan_status_data": "vue_mainwan_data",
     },
 }
 
@@ -47,6 +65,7 @@ _MODELS["F6645P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
 _MODELS["H6645P"] = _MODELS["H288A"]
 _MODELS["H3640"] = _MODELS["H288A"]
+_MODELS["E2631"] = _MODELS["E2631"]
 
 
 class zteClient:
@@ -312,7 +331,7 @@ class zteClient:
 
             # First request to set up context
             r = self.session.get(
-                f"https://{self.host}/?_type=menuView&_tag=localNetStatus&_={self.get_guid()}",
+                f"https://{self.host}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
                 verify=self.verify_ssl,
                 timeout=10,
             )
@@ -320,7 +339,7 @@ class zteClient:
             r.raise_for_status()
 
             # Main request for LAN devices
-            lan_request = f"https://{self.host}/?_type=menuData&_tag={self.paths['lan_script']}&_{self.get_guid()}"
+            lan_request = f"https://{self.host}/?_type={self.paths['type_main_request']}&_tag={self.paths['lan_script']}&_={self.get_guid()}"
             r = self.session.get(lan_request, verify=self.verify_ssl, timeout=10)
             self.log_request(r)
             r.raise_for_status()
@@ -344,19 +363,19 @@ class zteClient:
             # we can try to skip it for efficiency, but keep it for safety
             try:
                 # Try direct request first
-                wlan_request = f"https://{self.host}/?_type=menuData&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
+                wlan_request = f"https://{self.host}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
             except Exception:
                 # Fallback to full setup if direct request fails
                 r = self.session.get(
-                    f"https://{self.host}/?_type=menuView&_tag=localNetStatus&_={self.get_guid()}",
+                    f"https://{self.host}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
                     verify=self.verify_ssl,
                     timeout=10,
                 )
                 r.raise_for_status()
 
-                wlan_request = f"https://{self.host}/?_type=menuData&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
+                wlan_request = f"https://{self.host}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
 
@@ -428,11 +447,11 @@ class zteClient:
         wan_attrs = {}
         try:
             # # Fetch MenuView first.
-            url = f"https://{self.host}/?_type=menuView&_tag=ethWanStatus&Menu3Location=0&_={self.get_guid()}"
+            url = f"https://{self.host}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
             # Fetch MenuData.
-            url = f"https://{self.host}/?_type=menuData&_tag=wan_internetstatus_lua.lua&TypeUplink=2&pageType=1&_={self.get_guid()}"
+            url = f"https://{self.host}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
             self.log_request(r)
