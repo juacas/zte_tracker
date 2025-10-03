@@ -1,5 +1,14 @@
 # Release Notes
 
+## v2.0.6
+- Added support for ZTE AX3000 (E2631) router model.
+
+## v2.0.5
+
+- Fixed issue with device persistence after temporary network disconnections.
+- Improved adaptive polling intervals for better network stability.
+- Minor fixes for device naming and icon selection.
+
 ## v2.0.3
 
 - Added router reboot service: `zte_tracker.reboot` to remotely reboot the router.

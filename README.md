@@ -258,6 +258,7 @@ pytest custom_components/zte_tracker/tests/
 
 ## 🙏 Acknowledgments
 
+- **@juacas** for original development and ongoing maintenance
 - **@gselivanof** for H288A, H169A models support
 - **@TrinTragula** for H388X verification
 - **@kvshino** for H2640 verification
@@ -265,6 +266,7 @@ pytest custom_components/zte_tracker/tests/
 - **@onegambler** for H3600P verification
 - **@lapo** for H6645P verification
 - **@309631** for H3640 verification
+- **@LZDEROH** for AX3000 (E2631) verification
 
 ## 📄 License
 
