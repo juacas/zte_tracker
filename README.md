@@ -124,7 +124,8 @@ To pause or resume the tracker, use the ZTE Tracker Pause switch in the Home Ass
 | ZTE H3600P    |     H3600P      |    ✅    |
 | ZTE H3640 V10 |      H3640      |    ✅    |
 | ZTE H6645P V2 |     H6645P      |    ✅    |
-| ZTE AX3000    |      E2631      |    ✅    |
+| ZTE AX3000    |      AX3000    |    ✅    |
+| ZTE SR7410 (ZTE BE7200 Pro+)   |      SR7410      |    ✅    |
 
 > **Note**: This integration may work with additional ZTE router models. Try one of the above parameter values to test compatibility.
 
@@ -266,7 +267,8 @@ pytest custom_components/zte_tracker/tests/
 - **@onegambler** for H3600P verification
 - **@lapo** for H6645P verification
 - **@309631** for H3640 verification
-- **@LZDEROH** for AX3000 (E2631) verification
+- **@LZDEROH** for AX3000 verification
+- **gradypark86** for SR7410 verification
 
 ## 📄 License
 
