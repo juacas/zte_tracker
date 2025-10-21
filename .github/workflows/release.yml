@@ -1,0 +1,150 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag name to use (e.g. v2.0.7)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ github.event.inputs.tag_name || github.ref_name }}
+
+    steps:
+      - name: Checkout repository (fetch tags)
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Prepare asset name
+        run: |
+          ASSET_NAME="zte_tracker-${TAG_NAME}.zip"
+          echo "ASSET_NAME=${ASSET_NAME}" >> $GITHUB_ENV
+          echo "Tag: ${TAG_NAME}"
+
+      - name: Debug after prepare (env & git)
+        run: |
+          echo "=== ENV VARS ==="
+          echo "TAG_NAME: ${TAG_NAME}"
+          echo "ASSET_NAME: ${ASSET_NAME}"
+          echo "GITHUB_REF: ${GITHUB_REF}"
+          echo "GITHUB_SHA: ${GITHUB_SHA}"
+          echo "github.event_name: $GITHUB_EVENT_NAME"
+          echo
+          echo "=== GIT INFO ==="
+          git --no-pager show --summary --oneline HEAD || true
+          echo "All tags (most recent first):"
+          git for-each-ref --sort=-creatordate --format='%(refname:strip=2)' refs/tags | sed -n '1,10p' || true
+          echo "Latest tag: $(git describe --tags --abbrev=0 2>/dev/null || echo none)"
+        shell: bash
+
+      - name: Create ZIP asset
+        run: |
+          mkdir -p dist
+          zip -r "dist/${ASSET_NAME}" custom_components/zte_tracker README.md hacs.json || true
+          ls -lh dist || true
+
+      - name: Debug dist contents
+        run: |
+          echo "=== DIST CONTENTS ==="
+          ls -la dist || true
+          echo
+          echo "Asset file details:"
+          if [ -f "dist/${ASSET_NAME}" ]; then
+            stat -c '%n %s bytes' "dist/${ASSET_NAME}"
+          else
+            echo "dist/${ASSET_NAME} missing"
+          fi
+
+      - name: Gather commits since last release
+        id: changelog
+        run: |
+          set -e
+          TAG="${TAG_NAME}"
+          PREV_TAG=$(git for-each-ref --sort=-creatordate --format='%(refname:strip=2)' refs/tags | grep -v "^${TAG}$" | head -n1 || true)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${TAG}"
+          else
+            RANGE="${TAG}"
+          fi
+          BODY=$(git --no-pager log --pretty=format:'- %s (%h)' "${RANGE}" || true)
+          [ -z "$BODY" ] && BODY="No changes since last release"
+          TAG_MSG=$(git show -s --format=%B "${TAG}" 2>/dev/null || true)
+          if [ -n "$TAG_MSG" ]; then
+            # Emit real newlines into GITHUB_OUTPUT using printf
+            printf "body<<EOF\nRelease contents: %s\n\nChanges in this release:\n\n%s\nEOF\n" "$TAG_MSG" "$BODY" >> $GITHUB_OUTPUT
+          else
+            printf "body<<EOF\nChanges in this release:\n\n%s\nEOF\n" "$BODY" >> $GITHUB_OUTPUT
+          fi
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          printf "%s\n\n%s\n" "${HEADER}" "${BODY}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Debug changelog output
+        run: |
+          echo "=== CHANGELOG OUTPUT ==="
+          echo "Steps.changelog.outputs.body (raw):"
+          echo "----------------------------"
+          echo "${{ steps.changelog.outputs.body }}"
+          echo "----------------------------"
+        shell: bash
+
+      - name: Debug GITHUB_TOKEN availability
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "GITHUB_TOKEN is empty. This run will fail when attempting to create a release."
+            echo "Common causes: running from a fork or actions context without secrets."
+            exit 1
+          else
+            echo "GITHUB_TOKEN present (length: ${#GITHUB_TOKEN})"
+          fi
+        shell: bash
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          release_name: "ZTE_TRACKER_${{ env.TAG_NAME }}"
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: false
+
+      - name: Debug create_release outputs
+        run: |
+          echo "=== create_release outputs ==="
+          echo "upload_url: ${{ steps.create_release.outputs.upload_url }}"
+          echo "release_id: ${{ steps.create_release.outputs.id || 'n/a' }}"
+        shell: bash
+
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/${{ env.ASSET_NAME }}
+          asset_name: ${{ env.ASSET_NAME }}
+          asset_content_type: application/zip
+
+      - name: Debug upload-release-asset result
+        run: |
+          echo "=== Upload result debug ==="
+          echo "Asset attempted: dist/${ASSET_NAME}"
+          echo "Release upload_url used: ${{ steps.create_release.outputs.upload_url }}"
+          ls -la dist || true
+        shell: bash
