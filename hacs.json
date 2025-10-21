@@ -1,5 +1,6 @@
 {
   "name": "ZTE tracker",
   "render_readme": true,
-  "country": "ES"
+  "country": "ES",
+  "content": "integration"
 }
