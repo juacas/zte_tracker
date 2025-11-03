@@ -45,6 +45,16 @@ _MODELS = {
         'tag_wan_status_view': "ethWanStatus&Menu3Location=0",
         "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
     },
+    "H388X": {
+        "wlan_script": "accessdev_ssiddev_lua.lua",
+        "wlan_id_element": "OBJ_ACCESSDEV_ID",
+        "lan_script": "accessdev_landevs_lua.lua",
+        "lan_id_element": "OBJ_ACCESSDEV_ID",
+        "type_first_request": "menuView",
+        "type_main_request": "menuData",
+        'tag_wan_status_view': "ethWanStatus&Menu3Location=0",
+        "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1", # Reported in #44 wan_internetstatus_lua does not work on H388X
+    },
     "E2631": {
         "wlan_script": "vue_client_data",
         "wlan_id_element": "OBJ_CLIENTS_ID",
@@ -59,7 +69,6 @@ _MODELS = {
 
 # Add synonyms
 _MODELS["H169A"] = _MODELS["H288A"]
-_MODELS["H388X"] = _MODELS["H288A"]
 _MODELS["H2640"] = _MODELS["H288A"]
 _MODELS["F6645P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
