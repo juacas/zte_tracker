@@ -76,6 +76,7 @@ _MODELS["H6645P"] = _MODELS["H288A"]
 _MODELS["H3640"] = _MODELS["H288A"]
 _MODELS["E2631"] = _MODELS["E2631"]
 _MODELS["SR7410"] = _MODELS["E2631"]
+_MODELS["SR7110"] = _MODELS["E2631"]
 
 class zteClient:
     """ZTE router client with improved security and reliability."""
