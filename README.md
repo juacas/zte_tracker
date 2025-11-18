@@ -168,6 +168,55 @@ zte_tracker:
   username: admin
   password: !secret zte_password
 ```
+## Add to your dashboard
+
+### With auto-entities card
+To automatically display all connected devices on your dashboard, you can use the [auto-entities](https://github.com/thomasloven/lovelace-auto-entities) card.
+
+```yaml
+type: custom:auto-entities
+filter:
+  include:
+    - entity_id: device_tracker.zte_*
+sort: name
+card:
+  type: entities
+  title: ZTE Connected Devices
+```
+
+### Display with auto-entities card and flex-table card
+
+```yaml
+type: custom:auto-entities
+filter:
+  include:
+    - options: {}
+      domain: device_tracker
+      state: home
+card:
+  type: custom:flex-table-card
+  title: ZTE-Tracked Devices
+  clickable: true
+  sort_by: connect_time
+  columns:
+    - data: icon
+      name: Type
+    - data: network_type
+      name: Net
+    - data: state
+      name: State
+    - data: host_name
+      name: Host
+    - data: mac
+      name: MAC
+    - data: port
+      name: At
+    - data: last_seen
+      name: Seen
+      fmt: hours_mins_passed
+    - data: connect_time
+      name: Conn
+```
 
 ## 🔍 Advanced Configuration
 

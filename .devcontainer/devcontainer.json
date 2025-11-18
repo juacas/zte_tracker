@@ -68,7 +68,8 @@
 		}
 	},
 	"mounts": [
-		"source=${localWorkspaceFolder}/custom_components,target=/workspaces/homeassistant-core/custom_components,type=bind"
+		"source=${localWorkspaceFolder}/custom_components,target=/workspaces/homeassistant-core/custom_components,type=bind",
+		"source=${localWorkspaceFolder}/tests/configuration_test.yaml,target=/workspaces/homeassistant-core/configuration.yaml,type=bind"
 	],
 	"runArgs": [
 		"--privileged",
