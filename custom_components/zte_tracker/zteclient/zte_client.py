@@ -1,4 +1,5 @@
 from __future__ import annotations
+import datetime
 from os import error
 
 """ZTE router client with improved security and error handling."""
@@ -10,7 +11,6 @@ import time
 from typing import Any
 import warnings
 import xml.etree.ElementTree as ET
-
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 import requests
@@ -77,6 +77,7 @@ _MODELS["H3640"] = _MODELS["H288A"]
 _MODELS["E2631"] = _MODELS["E2631"]
 _MODELS["SR7410"] = _MODELS["E2631"]
 _MODELS["SR7110"] = _MODELS["E2631"]
+
 
 class zteClient:
     """ZTE router client with improved security and reliability."""
@@ -432,7 +433,7 @@ class zteClient:
                     pname = name_elem.text if name_elem is not None else None
                     pvalue = value_elem.text if value_elem is not None else None
                     if pname and pvalue and pname != "_InstID":
-                        router_details[pname] = pvalue
+                        router_details[pname] = int(pvalue) if pvalue is not None and pvalue.isdigit() else pvalue
             # node OBJ_POWERONTIME_ID has PowerOnTime.
             power_node = xml.find("OBJ_POWERONTIME_ID/Instance")
             if power_node:
@@ -444,8 +445,10 @@ class zteClient:
                     pname = name_elem.text if name_elem is not None else None
                     pvalue = value_elem.text if value_elem is not None else None
                     if pname and pvalue and pname != "_InstID":
-                        router_details[pname] = pvalue
-
+                        if pname == "PowerOnTime":
+                            router_details[pname] = int(pvalue) if pvalue is not None and pvalue.isdigit() else pvalue
+                        else:
+                            router_details[pname] = pvalue
             return router_details
 
         except Exception as e:
@@ -483,18 +486,18 @@ class zteClient:
                         break
                 if wan_node:
                     break
-            if not wan_node and instances:
+            if wan_node is None and instances:
                 wan_node = instances[0]
             if wan_node:
                 for i in range(0, len(wan_node) // 2):
                     pname = wan_node[i * 2].text
                     pvalue = wan_node[i * 2 + 1].text
                     if pname == "UpTime":
-                        wan_attrs["WAN_uptime"] = pvalue
+                        wan_attrs["WAN_uptime"] = int(pvalue)
                     elif pname == "ConnError":
                         wan_attrs["WAN_error_message"] = pvalue
                     elif pname == "RemainLeaseTime":
-                        wan_attrs["WAN_remain_leasetime"] = pvalue
+                        wan_attrs["WAN_remain_leasetime"] = int(pvalue)
                     elif pname == "ConnStatus":
                         wan_attrs["WAN_connected"] = pvalue == "Connected"
         except Exception as ex:
@@ -604,7 +607,12 @@ class zteClient:
                             elif pname == "LinkTime":
                                 device_info["LinkTime"] = pvalue
                             elif pname == "ConnectTime":
-                                device_info["ConnectTime"] = pvalue
+                                # Parse pvalue 2025/11/17 Mon 14:23:45 into HA datetime ISO Format.
+                                try:
+                                    dt = datetime.datetime.strptime(pvalue, "%Y/%m/%d %a %H:%M:%S")
+                                    device_info["ConnectTime"] = dt.isoformat()
+                                except ValueError:
+                                    device_info["ConnectTime"] = pvalue
                             elif pname == "AliasName":  # Contains the LAN port.
                                 device_info["Port"] = pvalue
 

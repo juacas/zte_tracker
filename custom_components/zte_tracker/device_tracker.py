@@ -9,6 +9,7 @@ from homeassistant.components.device_tracker import SourceType
 from homeassistant.components.device_tracker.config_entry import ScannerEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -31,16 +32,18 @@ async def async_setup_entry(
     # Track entities we've already created
     created_entities = set()
 
-    # Obtener el área del dispositivo ZTERouter
-    device_registry = hass.data.get("device_registry")
+    # Ensure router device exists in device registry so child device_tracker entities are attached
+    device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
-    area_id = None
-    # Buscar el dispositivo ZTERouter por entry_id
-    if device_registry:
-        for dev in device_registry.devices.values():
-            if entry.entry_id in dev.identifiers:
-                area_id = dev.area_id
-                break
+    router_info = (coordinator.data or {}).get("router_info", {}) or {}
+    router_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=entry.title or router_info.get("name", "ZTE Router"),
+        manufacturer=router_info.get("manufacturer", "ZTE"),
+        model=router_info.get("model"),
+    )
+    area_id = router_device.area_id
 
     @callback
     def _async_add_entities():
@@ -114,6 +117,7 @@ async def async_setup_entry(
     # Listen for new devices
     coordinator.async_add_listener(_async_add_entities)
 
+
 class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
     """Representation of a ZTE tracked device."""
 
@@ -138,9 +142,11 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        # All tracker entities reference the router device
         return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
+            identifiers={(DOMAIN, f"{self._entry.entry_id}_{self._mac.replace(':', '_')}")},
+            connections={("mac", self._mac)},
+            name=self._device_data.get("name") or self._mac,
+            manufacturer="ZTE",
             via_device=(DOMAIN, self._entry.entry_id),
         )
 

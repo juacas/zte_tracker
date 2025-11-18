@@ -1,5 +1,4 @@
 # Service definitions for ZTE Tracker integration
-
 reboot:
   name: Reboot ZTE Router
   description: Reboots the ZTE router.
