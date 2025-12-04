@@ -55,6 +55,7 @@ async def async_setup_entry(
         devices = data.get("devices", {})
 
         entities = []
+        allow_new_devices = coordinator.register_new_devices
         for mac, device_data in devices.items():
             # Only create entities for devices that have been seen as active at least once
             if device_data.get("active") or device_data.get("last_seen"):
@@ -73,6 +74,9 @@ async def async_setup_entry(
                         found = True
                         break
                 if not found:
+                    #  Skip creating new entity if not allowed
+                    if not allow_new_devices:
+                        continue
                     entity = ZteDeviceTrackerEntity(
                         coordinator, entry, mac, device_data
                     )

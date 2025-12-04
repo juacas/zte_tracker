@@ -111,6 +111,13 @@ To pause or resume the tracker, use the ZTE Tracker Pause switch in the Home Ass
 - Entity: `switch.zte_tracker_pause`
 - State: `on` (paused), `off` (running)
 
+## 🧩 Register New Devices
+
+To control whether newly discovered devices are added as `device_tracker` entities, use the ZTE Register New Devices switch.
+
+- Entity: `switch.zte_register_new_devices`
+- State: `on` (new devices will be registered), `off` (only existing tracked devices are updated)
+
 ## 🔧 Compatible Routers
 
 | Router Model  | Model Parameter | Verified |
