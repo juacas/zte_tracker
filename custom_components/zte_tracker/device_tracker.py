@@ -74,7 +74,7 @@ async def async_setup_entry(
                         found = True
                         break
                 if not found:
-                    #  Skip creating new entity if not allowed
+                    # Skip creating new entity if not allowed
                     if not allow_new_devices:
                         continue
                     entity = ZteDeviceTrackerEntity(

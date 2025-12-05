@@ -9,7 +9,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_REGISTER_NEW_DEVICES
+from .const import CONF_REGISTER_NEW_DEVICES, DOMAIN
 from .coordinator import ZteDataCoordinator
 
 
@@ -64,6 +64,7 @@ class ZtePauseSwitch(CoordinatorEntity, SwitchEntity):
             self.coordinator.resume_scanning()
             await self.coordinator.async_request_refresh()
 
+
 class ZteRegisterNewDevicesSwitch(CoordinatorEntity, SwitchEntity):
     """Switch to control registration of new devices."""
 
@@ -108,11 +109,11 @@ class ZteRegisterNewDevicesSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator.enable_register_new_devices()
         await self._async_update_entry_option(True)
         self.async_write_ha_state()
-        self.hass.async_create_task(self.coordinator.async_request_refresh())
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Disable registration of new devices."""
         self.coordinator.disable_register_new_devices()
         await self._async_update_entry_option(False)
         self.async_write_ha_state()
-        self.hass.async_create_task(self.coordinator.async_request_refresh())
+        await self.coordinator.async_request_refresh()
