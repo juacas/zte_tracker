@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## v2.0.10
+
+### Added
+- Switch to disable addition of new devices to the tracker. [#49](https://github.com/juacas/zte_tracker/issues/49) by @victorigualada (thanks).
 
 ## v2.0.7
 
