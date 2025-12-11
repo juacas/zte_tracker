@@ -10,6 +10,7 @@ ISSUE_URL = "https://github.com/juacas/zte_tracker/issues"
 DEFAULT_HOST = "192.168.1.1"
 DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = "admin"
+CONF_REGISTER_NEW_DEVICES = "register_new_devices"
 
 STARTUP = """
 -------------------------------------------------------------------

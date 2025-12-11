@@ -11,7 +11,7 @@ from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_PASSWORD, CONF_USERN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_REGISTER_NEW_DEVICES
 from .zteclient.zte_client import zteClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         )
         self._available = True
         self._paused = False
+        self._register_new_devices = entry.options.get(CONF_REGISTER_NEW_DEVICES, True)
         self._last_device_count = 0
         self._stable_count = 0
         self._device_cache: dict[str, dict[str, Any]] = {}
@@ -45,6 +46,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             _LOGGER,
             name=DOMAIN,
             update_interval=DEFAULT_UPDATE_INTERVAL,
+            config_entry=entry,
         )
 
     @property
@@ -57,6 +59,11 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         """Return if scanning is paused."""
         return self._paused
 
+    @property
+    def register_new_devices(self) -> bool:
+        """Return if new devices should be registered as entities."""
+        return self._register_new_devices
+
     def pause_scanning(self) -> None:
         """Pause device scanning."""
         self._paused = True
@@ -66,6 +73,16 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         """Resume device scanning."""
         self._paused = False
         _LOGGER.info("ZTE tracker scanning resumed")
+
+    def enable_register_new_devices(self) -> None:
+        """Enable automatic registration of new devices."""
+        self._register_new_devices = True
+        _LOGGER.info("ZTE tracker will register new devices")
+
+    def disable_register_new_devices(self) -> None:
+        """Disable automatic registration of new devices."""
+        self._register_new_devices = False
+        _LOGGER.info("ZTE tracker will not register new devices")
 
     def _adjust_update_interval(self, device_count: int) -> None:
         """Adjust update interval based on device activity."""
