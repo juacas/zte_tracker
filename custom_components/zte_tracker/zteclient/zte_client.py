@@ -71,6 +71,7 @@ _MODELS = {
 _MODELS["H169A"] = _MODELS["H288A"]
 _MODELS["H2640"] = _MODELS["H288A"]
 _MODELS["F6645P"] = _MODELS["F6640"]
+_MODELS["F6600P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
 _MODELS["H6645P"] = _MODELS["H288A"]
 _MODELS["H3640"] = _MODELS["H288A"]
@@ -662,18 +663,37 @@ class zteClient:
 
             post_data = f"IF_ACTION=Restart&Btn_restart=&_sessionTOKEN={session_token}"
             digest_str = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
+                     # F6600P uses a 4096-bit RSA key, other models use 2048-bit
+            if self.model == "F6600P":
+                pub_key_pem = (
+                    "-----BEGIN PUBLIC KEY-----\n"
+                    "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAwlo/vZBnSJ2MyJ0dbNcw\n"
+                    "DvzPqBN+O/BPvLX93GIJVSZmquJHD9X6Xn6VYeM9mRKzjEbXPlv73Dj/gjjtNj9j\n"
+                    "Tq2QVyW2Sd4ZkY9e3h1ALCCCfkbjnmSqedyrcvXriTeW+J65jhBje6lTJbafmC5q\n"
+                    "bGiItjt0OeOkT+Vb4S7hYPSWIjeYYBh+7Y/fg25Rt2a+RgC8dahvJ3ttB1LHXADr\n"
+                    "oCm6q7G+lpbRAlpC8jjc0rZdS0c6HcBoYgzW8vxjj2fTuFy3CZZTrpPyTv/C8K6B\n"
+                    "hjTnjRe6ocgFVyQ0RIYfx2hxSJcuauR57OzfMzlgFQv3RAXguDZtuVUFLO2sAiwL\n"
+                    "ELph3Acfy9Eh58SHcswZvsOSXY0JNb0XeRM9gxpntLRfM6TB7f9hYtYTDw5oKdyN\n"
+                    "BY+nnEa/IpBUjndGDrSs3Z4BxRbYcJEwkKQZkvw/5TpQYbkD6sTRVSlZPaXSjeCl\n"
+                    "0hsLCttqwJqRZcjbWXrINBYFw8PYE14Xr9BCyPgqocdQh7FgvasVgG6u5mLR1PBZ\n"
+                    "o4EFF/LdY0yvMG5rl9egBk1XD/UMayhRtmSQEUzYt3eEWLBbqJB6MbVJ2ygcv5EL\n"
+                    "ReDY0SWXw1PIEbHeP51A/MyB6kwSgZwdoQW3JiaPnGHMaE0NqfAYPNiGJLMsmvT/\n"
+                    "rNUI/8iSCW+WvSzx9tByUxsCAwEAAQ==\n"
+                    "-----END PUBLIC KEY-----"
+                )
+            else:
+                pub_key_pem = (
+                    "-----BEGIN PUBLIC KEY-----\n"
+                    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAodPTerkUVCYmv28SOfRV\n"
+                    "7UKHVujx/HjCUTAWy9l0L5H0JV0LfDudTdMNPEKloZsNam3YrtEnq6jqMLJV4ASb\n"
+                    "1d6axmIgJ636wyTUS99gj4BKs6bQSTUSE8h/QkUYv4gEIt3saMS0pZpd90y6+B/9\n"
+                    "hZxZE/RKU8e+zgRqp1/762TB7vcjtjOwXRDEL0w71Jk9i8VUQ59MR1Uj5E8X3WIc\n"
+                    "fYSK5RWBkMhfaTRM6ozS9Bqhi40xlSOb3GBxCmliCifOJNLoO9kFoWgAIw5hkSIb\n"
+                    "GH+4Csop9Uy8VvmmB+B3ubFLN35qIa5OG5+SDXn4L7FeAA5lRiGxRi8tsWrtew8w\n"
+                    "nwIDAQAB\n"
+                    "-----END PUBLIC KEY-----"
+                )
 
-            pub_key_pem = (
-                "-----BEGIN PUBLIC KEY-----\n"
-                "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAodPTerkUVCYmv28SOfRV\n"
-                "7UKHVujx/HjCUTAWy9l0L5H0JV0LfDudTdMNPEKloZsNam3YrtEnq6jqMLJV4ASb\n"
-                "1d6axmIgJ636wyTUS99gj4BKs6bQSTUSE8h/QkUYv4gEIt3saMS0pZpd90y6+B/9\n"
-                "hZxZE/RKU8e+zgRqp1/762TB7vcjtjOwXRDEL0w71Jk9i8VUQ59MR1Uj5E8X3WIc\n"
-                "fYSK5RWBkMhfaTRM6ozS9Bqhi40xlSOb3GBxCmliCifOJNLoO9kFoWgAIw5hkSIb\n"
-                "GH+4Csop9Uy8VvmmB+B3ubFLN35qIa5OG5+SDXn4L7FeAA5lRiGxRi8tsWrtew8w\n"
-                "nwIDAQAB\n"
-                "-----END PUBLIC KEY-----"
-            )
             public_key = serialization.load_pem_public_key(pub_key_pem.encode("utf-8"))
             encrypted_digest = public_key.encrypt(
                 digest_str.encode("utf-8"), padding.PKCS1v15()
@@ -696,6 +716,7 @@ class zteClient:
             error_str = xml.findtext("IF_ERRORSTR")
             if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
                 _LOGGER.error("Router error: %s", error_str)
+                _LOGGER.debug("Reboot response XML: %s", r.text)
                 raise Exception(f"Router error: {error_str}")
 
             self.statusmsg = "Reboot command sent successfully."

@@ -109,15 +109,18 @@ async def async_reboot_service(call: ServiceCall):
     rebooted = []
 
     for entry_id, coordinator in hass.data[DOMAIN].items():
+        if entry_id == "yaml_config":
+            continue
         client = getattr(coordinator, "client", None)
         if not client:
             continue
         if host:
             if getattr(client, "host", None) == host:
-                if client.reboot():
+                # Use coordinator's async method to avoid blocking the event loop
+                if await coordinator.async_reboot_router():
                     rebooted.append(host)
         else:
-            if client.reboot():
+            if await coordinator.async_reboot_router():
                 rebooted.append(client.host)
 
     if rebooted:
