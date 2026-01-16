@@ -663,7 +663,7 @@ class zteClient:
 
             post_data = f"IF_ACTION=Restart&Btn_restart=&_sessionTOKEN={session_token}"
             digest_str = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
-                     # F6600P uses a 4096-bit RSA key, other models use 2048-bit
+            # F6600P uses a 4096-bit RSA key, other models use 2048-bit
             if self.model == "F6600P":
                 pub_key_pem = (
                     "-----BEGIN PUBLIC KEY-----\n"

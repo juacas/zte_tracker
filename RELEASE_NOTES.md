@@ -1,4 +1,8 @@
 # Release Notes
+## v2.0.11
+- Support for F6600P router model. [#53](https://github.com/juacas/zte_tracker/issues/53) thanks @lebdim
+- Added 4096 bit private key for F6600P.
+- Fix reboot action. Tested on F6600P. Not working for F6640. Testing help needed. [#53](https://github.com/juacas/zte_tracker/issues/52)
 
 ## v2.0.9
 ### Fixed
