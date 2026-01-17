@@ -1,4 +1,9 @@
 # Release Notes
+## v2.0.12
+### Added
+- Reboot button for easy router reboot from Home Assistant UI.
+- Reboot action working for F6640 and similar models.
+
 ## v2.0.11
 - Support for F6600P router model. [#53](https://github.com/juacas/zte_tracker/issues/53) thanks @lebdim
 - Added 4096 bit private key for F6600P.

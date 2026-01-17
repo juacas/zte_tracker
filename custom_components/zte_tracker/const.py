@@ -5,7 +5,12 @@ from homeassistant.const import Platform
 
 DOMAIN = "zte_tracker"
 DOMAIN_DATA = f"{DOMAIN}_data"
-PLATFORMS = [Platform.SENSOR, Platform.DEVICE_TRACKER, Platform.SWITCH]
+PLATFORMS = [
+    Platform.SENSOR,
+    Platform.DEVICE_TRACKER,
+    Platform.SWITCH,
+    Platform.BUTTON,
+]
 ISSUE_URL = "https://github.com/juacas/zte_tracker/issues"
 DEFAULT_HOST = "192.168.1.1"
 DEFAULT_USERNAME = "admin"
