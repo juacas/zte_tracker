@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import datetime
 from os import error
 
@@ -11,6 +12,7 @@ import time
 from typing import Any
 import warnings
 import xml.etree.ElementTree as ET
+
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 import requests
@@ -18,6 +20,8 @@ from requests import Session
 from requests.adapters import HTTPAdapter
 from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
+
+from ..const import DEFAULT_QUERY_ROUTER_DETAILS, DEFAULT_QUERY_WAN_STATUS
 
 # Suppress InsecureRequestWarning globally
 warnings.simplefilter("ignore", InsecureRequestWarning)
@@ -32,7 +36,7 @@ _MODELS = {
         "lan_id_element": "OBJ_ACCESSDEV_ID",
         "type_first_request": "menuView",
         "type_main_request": "menuData",
-        'tag_wan_status_view': "ethWanStatus&Menu3Location=0",
+        "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
         "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
     },
     "H288A": {
@@ -42,7 +46,7 @@ _MODELS = {
         "lan_id_element": "OBJ_ACCESSDEV_ID",
         "type_first_request": "menuView",
         "type_main_request": "menuData",
-        'tag_wan_status_view': "ethWanStatus&Menu3Location=0",
+        "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
         "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
     },
     "H388X": {
@@ -52,8 +56,8 @@ _MODELS = {
         "lan_id_element": "OBJ_ACCESSDEV_ID",
         "type_first_request": "menuView",
         "type_main_request": "menuData",
-        'tag_wan_status_view': "ethWanStatus&Menu3Location=0",
-        "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1", # Reported in #44 wan_internetstatus_lua does not work on H388X
+        "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
+        "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1",  # Reported in #44 wan_internetstatus_lua does not work on H388X
     },
     "E2631": {
         "wlan_script": "vue_client_data",
@@ -90,12 +94,17 @@ class zteClient:
         password: str,
         model: str,
         verify_ssl: bool = False,
+        query_wan_status: bool = DEFAULT_QUERY_WAN_STATUS,
+        query_router_details: bool = DEFAULT_QUERY_ROUTER_DETAILS,
     ) -> None:
         """Initialize the client."""
         self.statusmsg: str | None = None
         self.host = host
         self.username = username
         self.password = password
+        # Flags to enable/disable optional router queries
+        self.query_wan_status = bool(query_wan_status)
+        self.query_router_details = bool(query_router_details)
         self.session: Session | None = None
         self.login_data: dict[str, Any] | None = None
         self.status = "on"
@@ -403,6 +412,9 @@ class zteClient:
 
     def get_router_details(self) -> dict[str, Any] | None:
         """Get router details."""
+        if not getattr(self, "query_router_details", True):
+            _LOGGER.debug("Router details query disabled by client flag")
+            return {}
         try:
             if not self.session:
                 raise RuntimeError("Session not initialized")
@@ -434,7 +446,11 @@ class zteClient:
                     pname = name_elem.text if name_elem is not None else None
                     pvalue = value_elem.text if value_elem is not None else None
                     if pname and pvalue and pname != "_InstID":
-                        router_details[pname] = int(pvalue) if pvalue is not None and pvalue.isdigit() else pvalue
+                        router_details[pname] = (
+                            int(pvalue)
+                            if pvalue is not None and pvalue.isdigit()
+                            else pvalue
+                        )
             # node OBJ_POWERONTIME_ID has PowerOnTime.
             power_node = xml.find("OBJ_POWERONTIME_ID/Instance")
             if power_node:
@@ -447,7 +463,11 @@ class zteClient:
                     pvalue = value_elem.text if value_elem is not None else None
                     if pname and pvalue and pname != "_InstID":
                         if pname == "PowerOnTime":
-                            router_details[pname] = int(pvalue) if pvalue is not None and pvalue.isdigit() else pvalue
+                            router_details[pname] = (
+                                int(pvalue)
+                                if pvalue is not None and pvalue.isdigit()
+                                else pvalue
+                            )
                         else:
                             router_details[pname] = pvalue
             return router_details
@@ -458,6 +478,10 @@ class zteClient:
 
     def get_wan_status(self) -> dict[str, Any]:
         """Fetch WAN status and return relevant attributes."""
+        if not getattr(self, "query_wan_status", True):
+            _LOGGER.debug("WAN status query disabled by client flag")
+            return {}
+
         wan_attrs = {}
         try:
             # # Fetch MenuView first.
@@ -509,7 +533,7 @@ class zteClient:
         # Get cookie value for debugging.
         if not r or not r.request:
             return
-        #sid = self.session.cookies.get('SID_HTTPS_')
+        # sid = self.session.cookies.get('SID_HTTPS_')
 
         _LOGGER.debug(
             "Request %d URL: %s Headers: %s",
@@ -541,7 +565,7 @@ class zteClient:
             # If contains IF_ERRORSTR then response is in error.
             error_str = xml.findtext("IF_ERRORSTR")
             if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
-                _LOGGER.error("Router error: %s", error_str)
+                _LOGGER.warning("Router error: %s", error_str)
                 raise Exception(f"Router error: {error_str}")
 
             # Parse WLAN AP info for ESSID mapping
@@ -610,7 +634,9 @@ class zteClient:
                             elif pname == "ConnectTime":
                                 # Parse pvalue 2025/11/17 Mon 14:23:45 into HA datetime ISO Format.
                                 try:
-                                    dt = datetime.datetime.strptime(pvalue, "%Y/%m/%d %a %H:%M:%S")
+                                    dt = datetime.datetime.strptime(
+                                        pvalue, "%Y/%m/%d %a %H:%M:%S"
+                                    )
                                     device_info["ConnectTime"] = dt.isoformat()
                                 except ValueError:
                                     device_info["ConnectTime"] = pvalue

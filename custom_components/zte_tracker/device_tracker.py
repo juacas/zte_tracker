@@ -74,8 +74,12 @@ async def async_setup_entry(
                         found = True
                         break
                 if not found:
-                    # Skip creating new entity if not allowed
-                    if not allow_new_devices:
+                    # Skip creating new entity if not allowed, unless the entity
+                    # already exists in the Home Assistant entity registry.
+                    existing_entity_id = entity_registry.async_get_entity_id(
+                        "device_tracker", DOMAIN, unique_id
+                    )
+                    if not allow_new_devices and existing_entity_id is None:
                         continue
                     entity = ZteDeviceTrackerEntity(
                         coordinator, entry, mac, device_data
@@ -147,7 +151,9 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
     @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
-            identifiers={(DOMAIN, f"{self._entry.entry_id}_{self._mac.replace(':', '_')}")},
+            identifiers={
+                (DOMAIN, f"{self._entry.entry_id}_{self._mac.replace(':', '_')}")
+            },
             connections={("mac", self._mac)},
             name=self._device_data.get("name") or self._mac,
             manufacturer="ZTE",

@@ -9,14 +9,20 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.exceptions import HomeAssistantError
-
 import voluptuous as vol
 
-from .const import DOMAIN, PLATFORMS
+from .const import (
+    CONF_QUERY_ROUTER_DETAILS,
+    CONF_QUERY_WAN_STATUS,
+    DEFAULT_QUERY_ROUTER_DETAILS,
+    DEFAULT_QUERY_WAN_STATUS,
+    DOMAIN,
+    PLATFORMS,
+)
 from .coordinator import ZteDataCoordinator
 from .zteclient.zte_client import zteClient
 
@@ -56,6 +62,26 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up ZTE Tracker from a config entry."""
+    # Migrate legacy config keys from entry.data to entry.options if present
+    try:
+        data_copy = dict(entry.data)
+        options_copy = dict(entry.options) if entry.options is not None else {}
+        migrated = False
+        for key in (CONF_QUERY_WAN_STATUS, CONF_QUERY_ROUTER_DETAILS):
+            if key in data_copy and key not in options_copy:
+                options_copy[key] = data_copy.pop(key)
+                migrated = True
+        if migrated:
+            _LOGGER.info(
+                "Migrating ZTE config keys from data to options for entry %s",
+                entry.entry_id,
+            )
+            hass.config_entries.async_update_entry(
+                entry, data=data_copy, options=options_copy
+            )
+    except Exception as ex:  # defensive: don't block setup on migration errors
+        _LOGGER.debug("Error migrating config entry options: %s", ex)
+
     coordinator = ZteDataCoordinator(hass, entry)
 
     # Fetch initial data
@@ -69,6 +95,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register all services
     setup_services(hass)
+
+    # Register an update listener to apply option changes at runtime
+    async def _async_options_updated(
+        hass: HomeAssistant, updated_entry: ConfigEntry
+    ) -> None:
+        """Handle updated options for an entry."""
+        coordinator = hass.data.get(DOMAIN, {}).get(updated_entry.entry_id)
+        if not coordinator:
+            return
+
+        # Resolve values with options overriding data
+        query_wan = updated_entry.options.get(
+            CONF_QUERY_WAN_STATUS,
+            updated_entry.data.get(CONF_QUERY_WAN_STATUS, DEFAULT_QUERY_WAN_STATUS),
+        )
+        query_router = updated_entry.options.get(
+            CONF_QUERY_ROUTER_DETAILS,
+            updated_entry.data.get(
+                CONF_QUERY_ROUTER_DETAILS, DEFAULT_QUERY_ROUTER_DETAILS
+            ),
+        )
+
+        # Apply to existing client
+        client = getattr(coordinator, "client", None)
+        if client:
+            client.query_wan_status = bool(query_wan)
+            client.query_router_details = bool(query_router)
+
+        # Request an immediate refresh so the new options take effect
+        try:
+            await coordinator.async_request_refresh()
+        except Exception:
+            # If refresh fails, schedule a full reload of the entry
+            await async_reload_entry(hass, updated_entry)
+
+    entry.add_update_listener(_async_options_updated)
 
     return True
 

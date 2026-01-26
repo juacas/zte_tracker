@@ -44,3 +44,11 @@ DEFAULT_NAME = "ZTE router tracker"
 
 # Interval in seconds
 INTERVAL = 60
+
+# Config options for optional queries
+CONF_QUERY_WAN_STATUS = "query_wan_status"
+CONF_QUERY_ROUTER_DETAILS = "query_router_details"
+
+# Defaults for optional queries
+DEFAULT_QUERY_WAN_STATUS = True
+DEFAULT_QUERY_ROUTER_DETAILS = True

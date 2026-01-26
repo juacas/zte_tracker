@@ -1,9 +1,10 @@
 """Data coordinator for ZTE Tracker integration."""
+
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import datetime, timedelta
+import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -11,7 +12,12 @@ from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_PASSWORD, CONF_USERN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, CONF_REGISTER_NEW_DEVICES
+from .const import (
+    CONF_QUERY_ROUTER_DETAILS,
+    CONF_QUERY_WAN_STATUS,
+    CONF_REGISTER_NEW_DEVICES,
+    DOMAIN,
+)
 from .zteclient.zte_client import zteClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,11 +33,26 @@ class ZteDataCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
         self.entry = entry
+        # Resolve flags: options take precedence over data, then defaults
+        query_wan = entry.options.get(
+            CONF_QUERY_WAN_STATUS, entry.data.get(CONF_QUERY_WAN_STATUS)
+        )
+        query_router = entry.options.get(
+            CONF_QUERY_ROUTER_DETAILS, entry.data.get(CONF_QUERY_ROUTER_DETAILS)
+        )
+
+        # Ensure booleans with sensible defaults if None
+        query_wan = bool(query_wan) if query_wan is not None else True
+        query_router = bool(query_router) if query_router is not None else True
+
         self.client = zteClient(
             entry.data[CONF_HOST],
             entry.data[CONF_USERNAME],
             entry.data[CONF_PASSWORD],
             entry.data[CONF_MODEL],
+            verify_ssl=False,
+            query_wan_status=query_wan,
+            query_router_details=query_router,
         )
         self._available = True
         self._paused = False
@@ -67,6 +88,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
     def pause_scanning(self) -> None:
         """Pause device scanning."""
         self._paused = True
+        self.client.logout()
         _LOGGER.info("ZTE tracker scanning paused")
 
     def resume_scanning(self) -> None:
@@ -111,6 +133,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
     async def async_reboot_router(self) -> bool:
         """Reboot the router."""
+
         def _reboot():
             try:
                 return self.client.reboot()
@@ -149,7 +172,9 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             if mac in self._device_cache:
                 cached = self._device_cache[mac]
                 # Keep the name if new one is generic and cached one is better
-                if device_data["name"] in ("Unknown", mac) and cached.get("name", "Unknown") not in ("Unknown", mac):
+                if device_data["name"] in ("Unknown", mac) and cached.get(
+                    "name", "Unknown"
+                ) not in ("Unknown", mac):
                     device_data["name"] = cached["name"]
 
                 # Keep last_seen from cache if device is not currently active
@@ -175,7 +200,9 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Scanning paused, returning cached data")
             # Return cached data when paused
             return {
-                "devices": {mac: data.copy() for mac, data in self._device_cache.items()},
+                "devices": {
+                    mac: data.copy() for mac, data in self._device_cache.items()
+                },
                 "router_info": {
                     "host": self.client.host,
                     "model": self.client.model,
@@ -183,11 +210,17 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 },
             }
 
-        def _fetch_router_data() -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None, dict[str, Any] | None]:
+        def _fetch_router_data() -> tuple[
+            list[dict[str, Any]] | None,
+            dict[str, Any] | None,
+            dict[str, Any] | None,
+        ]:
             """Fetch router data in executor."""
             try:
                 if not self.client.login():
-                    _LOGGER.warning("Login failed: %s@%s", self.client.username, self.client.host)
+                    _LOGGER.warning(
+                        "Login failed: %s@%s", self.client.username, self.client.host
+                    )
                     return None, None, None
 
                 devices = self.client.get_devices_response()
@@ -204,25 +237,33 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 except Exception:
                     pass
 
-        devices, wanstatus, routerdetails = await self.hass.async_add_executor_job(_fetch_router_data)
+        devices, wanstatus, routerdetails = await self.hass.async_add_executor_job(
+            _fetch_router_data
+        )
 
         if devices is None:
             self._available = False
             devicesItem = {}
             # Return cached data on failure if we have it and it's recent
-            if (self._device_cache and self._last_successful_update and
-                datetime.now() - self._last_successful_update < timedelta(minutes=10)):
+            if (
+                self._device_cache
+                and self._last_successful_update
+                and datetime.now() - self._last_successful_update
+                < timedelta(minutes=10)
+            ):
                 _LOGGER.warning("Using cached data due to connection failure")
-                devicesItem = {mac: data.copy() for mac, data in self._device_cache.items()}
+                devicesItem = {
+                    mac: data.copy() for mac, data in self._device_cache.items()
+                }
 
             return {
-                    "devices": devicesItem,
-                    "router_info": {
-                        "host": self.client.host,
-                        "model": self.client.model,
-                        "status": "unavailable",
-                    },
-                }
+                "devices": devicesItem,
+                "router_info": {
+                    "host": self.client.host,
+                    "model": self.client.model,
+                    "status": "unavailable",
+                },
+            }
 
         # Have info to return. Tracker is working.
         self._available = True
