@@ -30,9 +30,11 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 
 - **Router status monitoring** with connection health indicators: WAN uptime, WAN_remain_leasetime, WAN_error_message, WAN_connected (kindly requested by @cagnulein)
 - **Remote router reboot** capability through service calls (**Beta service!**)
+- **Register new devices switch** to control addition of new devices to the tracker or only update previously known devices.
 - **Pause/resume scanning** to allow administrative access to router from other browsers
 - **Real-time statistics** including device counts and connection status
-- **Router details available as sensor attributes** (model, firmware, uptime, WAN info, etc.)
+- **Router details available as sensor attributes** (model, firmware, uptime, WAN info, etc.) Wan details and router details scans can be disabled to avoid extra load and warnings on unsupported models by setting the corresponding options to false.
+
 
 ### Performance & Reliability
 

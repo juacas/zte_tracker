@@ -1,5 +1,5 @@
 # Dependencias básicas de Home Assistant Core
-homeassistant
+homeassistant >= 2026.1.0
 
 # Herramientas para pruebas
 pytest

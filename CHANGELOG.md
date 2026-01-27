@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## v2.0.13
+### Added
+- Option to enable/disable Wan and router details scans. Avoid extra load and warnings on unsupported models. [#52](https://github.com/juacas/zte_tracker/issues/52) reported by @Ices-Eyes (help needed for proper support for H2640 and H6645P V2).
+
+### Fixed
+- "Add new devices" switch not using known devices not in cache.
+- Ensure logout from de router when pausing scanning.
+
 ## v2.0.12
 
 ### Added

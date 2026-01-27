@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+import re
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -199,19 +200,40 @@ async def async_remove_tracked_entity(call: ServiceCall):
     if not mac:
         _LOGGER.error("No MAC address provided for removal.")
         return
-    # Remove entity using entity registry
+
+    def _normalize_mac(m: str) -> str:
+        """Normalize MAC into upper-case colon-separated format (AA:BB:CC:DD:EE:FF)."""
+        raw = re.sub(r"[^0-9A-Fa-f]", "", m or "")
+        raw = raw.upper()
+        if len(raw) == 12:
+            return ":".join(raw[i : i + 2] for i in range(0, 12, 2))
+        return m.strip().upper()
+
+    canonical_mac = _normalize_mac(mac)
+
+    # Remove entity using entity registry. Be flexible: match by unique_id suffix
     entity_registry = er.async_get(hass)
-    # Try all entry_ids for robustness
     removed = False
-    for entry_id in hass.data.get(DOMAIN, {}):
-        unique_id = f"{entry_id}_{mac.replace(':', '_')}"
-        entity_id = entity_registry.async_get_entity_id(
-            "device_tracker", DOMAIN, unique_id
-        )
-        if entity_id:
+
+    for entity_id, entity in list(entity_registry.entities.items()):
+        if entity.domain != "device_tracker" or entity.platform != DOMAIN:
+            continue
+
+        unique = entity.unique_id or ""
+        # Unique id format expected: <entry_id>_<MAC_WITH_UNDERSCORES>
+        if "_" not in unique:
+            continue
+        mac_part = unique.split("_")[-1].replace("_", ":").upper()
+        if mac_part == canonical_mac.replace(":", ":"):
+            # Found a match; remove it
             entity_registry.async_remove(entity_id)
-            _LOGGER.info("Removed tracked entity for MAC: %s", mac)
+            _LOGGER.info(
+                "Removed tracked entity for MAC: %s (entity: %s)",
+                canonical_mac,
+                entity_id,
+            )
             removed = True
+
     if not removed:
         _LOGGER.warning("No entity found for MAC: %s", mac)
         raise HomeAssistantError(f"No entity found for MAC: {mac}")
