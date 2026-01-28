@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 import re
-from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 import voluptuous as vol
@@ -194,7 +193,7 @@ async def async_reboot_service(call: ServiceCall):
 
 
 async def async_remove_tracked_entity(call: ServiceCall):
-    """Remove a tracked device entity by MAC address."""
+    """Remove a tracked device entity by MAC address. If the device becomes orphaned, remove it too."""
     hass = call.hass
     mac = call.data.get("mac")
     if not mac:
@@ -220,12 +219,14 @@ async def async_remove_tracked_entity(call: ServiceCall):
             continue
 
         unique = entity.unique_id or ""
-        # Unique id format expected: <entry_id>_<MAC_WITH_UNDERSCORES>
-        if "_" not in unique:
-            continue
-        mac_part = unique.split("_")[-1].replace("_", ":").upper()
-        if mac_part == canonical_mac.replace(":", ":"):
-            # Found a match; remove it
+        # Unique id format expected: <entry_id>_<MAC_WITH_UNDERSCORES> or just <MAC>
+        if "_" in unique:
+            mac_part = unique.split("_")[-1].replace("_", ":").upper()
+        else:
+            mac_part = unique
+        if mac_part == canonical_mac:
+            # Found a match; remove it and clean up device if orphaned
+            device_id = getattr(entity, "device_id", None)
             entity_registry.async_remove(entity_id)
             _LOGGER.info(
                 "Removed tracked entity for MAC: %s (entity: %s)",
@@ -233,6 +234,24 @@ async def async_remove_tracked_entity(call: ServiceCall):
                 entity_id,
             )
             removed = True
+
+            # If the entity belonged to a device, remove the device if it has no more entities
+            if device_id:
+                # Check if any other entities reference this device
+                still_has_entities = any(
+                    e.device_id == device_id for e in entity_registry.entities.values()
+                )
+                if not still_has_entities:
+                    try:
+                        device_registry = dr.async_get(hass)
+                        device_registry.async_remove_device(device_id)
+                        _LOGGER.info(
+                            "Removed device %s for MAC: %s as it had no remaining entities",
+                            device_id,
+                            canonical_mac,
+                        )
+                    except Exception as ex:  # defensive: log but don't fail the service
+                        _LOGGER.debug("Failed removing device %s: %s", device_id, ex)
 
     if not removed:
         _LOGGER.warning("No entity found for MAC: %s", mac)

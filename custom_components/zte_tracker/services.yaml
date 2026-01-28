@@ -12,7 +12,7 @@ reboot:
 
 remove_tracked_entity:
   name: Remove Tracked Device Entity
-  description: Removes a tracked device entity by MAC address.
+  description: Removes a tracked device entity by MAC address. If the device becomes orphaned, it will be removed as well.
   fields:
     mac:
       name: MAC Address
