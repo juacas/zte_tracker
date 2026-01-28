@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - "Add new devices" switch not using known devices not in cache.
 - Ensure logout from de router when pausing scanning.
+- Fix device removal service to also remove orphaned devices without entities.
 
 ## v2.0.12
 
