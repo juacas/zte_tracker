@@ -126,6 +126,7 @@ To control whether newly discovered devices are added as `device_tracker` entiti
 | ------------- | :-------------: | :------: |
 | ZTE F6640     |      F6640      |    ✅    |
 | ZTE F6645P    |     F6645P      |    ✅    |
+| ZTE F680    |      F680      |    ✅    |
 | ZTE H169A     |      H169A      |    ✅    |
 | ZTE H2640     |      H2640      |    ✅    |
 | ZTE H288A     |      H288A      |    ✅    |

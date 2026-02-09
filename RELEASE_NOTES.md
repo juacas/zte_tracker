@@ -1,4 +1,9 @@
 # Release Notes
+## v2.0.14
+### Added
+- Support for ZTE F680 router model.
+- Fix instance creation with wan status and router details queries enabled. Thanks to @GrzegorzWalewski and @risalt for reporting! [#55](https://github.com/juacas/zte_tracker/issues/55)
+
 ## v2.0.13
 ### Added
 - Option to enable/disable Wan and router details scans. Avoid extra load and warnings on unsupported models. [#52](https://github.com/juacas/zte_tracker/issues/52) reported by @Ices-Eyes (help needed for proper support for H2640 and H6645P V2).

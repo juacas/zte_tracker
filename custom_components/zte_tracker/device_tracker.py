@@ -80,6 +80,7 @@ async def async_setup_entry(
                         "device_tracker", DOMAIN, unique_id
                     )
                     if not allow_new_devices and existing_entity_id is None:
+                        # Skip creating new entity when not allowed and no existing registry entry
                         continue
                     entity = ZteDeviceTrackerEntity(
                         coordinator, entry, mac, device_data

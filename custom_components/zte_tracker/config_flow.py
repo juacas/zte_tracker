@@ -106,7 +106,12 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         raise ValueError(f"Unsupported model: {model}")
 
     client = zteClient(
-        host, username, password, model, query_wan_status, query_router_details
+        host,
+        username,
+        password,
+        model,
+        query_wan_status=query_wan_status,
+        query_router_details=query_router_details,
     )
 
     # Test the connection in a separate thread to avoid blocking
