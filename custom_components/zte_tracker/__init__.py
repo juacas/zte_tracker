@@ -138,7 +138,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        # Best-effort: cleanly close the persistent router session so we don't
+        # leave a stale logged-in session on the device. Wrapped in timeout
+        # and broad exception catch so a hung/dead router can never block or
+        # fail HA unload/restart.
+        if coordinator is not None and getattr(coordinator, "client", None):
+            import asyncio
+
+            async def _safe_logout() -> None:
+                try:
+                    async with coordinator._client_lock:
+                        await asyncio.wait_for(
+                            hass.async_add_executor_job(coordinator.client.logout),
+                            timeout=3,
+                        )
+                except Exception as ex:  # noqa: BLE001
+                    _LOGGER.debug("Ignoring logout error during unload: %s", ex)
+
+            await _safe_logout()
 
     return unload_ok
 
