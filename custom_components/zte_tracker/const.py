@@ -52,3 +52,11 @@ CONF_QUERY_ROUTER_DETAILS = "query_router_details"
 # Defaults for optional queries
 DEFAULT_QUERY_WAN_STATUS = True
 DEFAULT_QUERY_ROUTER_DETAILS = True
+
+# Opt-in flag: keep the router session alive across polls instead of
+# logging in/out on every poll. Reduces router auth-log noise dramatically
+# on firmwares where the upstream login_need_refresh short-circuit fails
+# (e.g. F6600P / Inalan FTTH GR V9.0.10P24N1). Defaults to False so existing
+# users keep the original upstream login/fetch/logout flow unchanged.
+CONF_SESSION_REUSE = "session_reuse"
+DEFAULT_SESSION_REUSE = False

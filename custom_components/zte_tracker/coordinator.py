@@ -16,6 +16,8 @@ from .const import (
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
     CONF_REGISTER_NEW_DEVICES,
+    CONF_SESSION_REUSE,
+    DEFAULT_SESSION_REUSE,
     DOMAIN,
 )
 from .zteclient.zte_client import zteClient
@@ -33,14 +35,6 @@ SLOW_UPDATE_INTERVAL = timedelta(seconds=120)
 # high enough to drop auth-log noise from ~120/hr (per-poll spam) to ~2/hr.
 # The retry-once path below catches sessions that die earlier.
 SESSION_MAX_AGE = timedelta(minutes=30)
-
-# Models whose firmware does NOT honour the upstream login_need_refresh
-# short-circuit and therefore re-authenticate on every poll, flooding the
-# router auth log. For these we keep the session across polls and only
-# re-login on SESSION_MAX_AGE / fetch failure / explicit invalidation.
-# Whitelist intentionally narrow: only models we have hands-on confirmed
-# the noisy behaviour on. Other models keep the original upstream flow.
-SESSION_REUSE_MODELS = {"F6600P"}
 
 
 class ZteDataCoordinator(DataUpdateCoordinator):
@@ -84,9 +78,19 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         # the router daemon will emit "Client token is not equal to server
         # token" if two flows step on each other.
         self._client_lock = asyncio.Lock()
-        # Opt-in to session reuse for the few firmwares known to flood their
-        # auth log when the upstream login_need_refresh short-circuit fails.
-        self._reuse_session = entry.data.get(CONF_MODEL) in SESSION_REUSE_MODELS
+        # Opt-in session reuse: user-configurable per integration entry via the
+        # options flow. Off by default so existing users keep the original
+        # upstream login/fetch/logout flow. Enabling it eliminates the
+        # per-poll login/logout pairs on firmwares (e.g. F6600P) where the
+        # upstream login_need_refresh short-circuit fails. The fallback path
+        # in _fetch_router_data_reuse handles stale sessions, so this is safe
+        # to try on any model.
+        self._reuse_session = bool(
+            entry.options.get(
+                CONF_SESSION_REUSE,
+                entry.data.get(CONF_SESSION_REUSE, DEFAULT_SESSION_REUSE),
+            )
+        )
 
         super().__init__(
             hass,
@@ -264,9 +268,9 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         ]:
             """Original upstream fetch path: login -> fetch -> logout per poll.
 
-            Used for every model not in SESSION_REUSE_MODELS so we don't
-            change behaviour for users who are not affected by the auth-log
-            flooding bug.
+            Used when the session_reuse option is disabled (default) so we
+            don't change behaviour for users who haven't opted in to the
+            session-reuse experiment.
             """
             try:
                 if not self.client.login():
@@ -293,7 +297,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             dict[str, Any] | None,
             dict[str, Any] | None,
         ]:
-            """Session-reuse fetch path for SESSION_REUSE_MODELS.
+            """Session-reuse fetch path (opt-in via the session_reuse option).
 
             Reuses the existing client session across polls to avoid spamming
             the router auth log with login/logout pairs. If the cached session
