@@ -9,7 +9,10 @@
           "host": "Router IP Address",
           "username": "Username",
           "password": "Password",
-          "model": "Router Model"
+          "model": "Router Model",
+          "query_wan_status": "Query WAN status",
+          "query_router_details": "Query router details",
+          "session_reuse": "Reuse router session across polls (reduces auth-log noise; recommended for F6600P)"
         }
       }
     },
@@ -32,7 +35,10 @@
           "host": "Router IP Address",
           "username": "Username",
           "password": "Password",
-          "model": "Router Model"
+          "model": "Router Model",
+          "query_wan_status": "Query WAN status",
+          "query_router_details": "Query router details",
+          "session_reuse": "Reuse router session across polls (reduces auth-log noise; recommended for F6600P)"
         }
       }
     }

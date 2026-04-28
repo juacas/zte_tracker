@@ -16,6 +16,8 @@ from .const import (
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
     CONF_REGISTER_NEW_DEVICES,
+    CONF_SESSION_REUSE,
+    DEFAULT_SESSION_REUSE,
     DOMAIN,
 )
 from .zteclient.zte_client import zteClient
@@ -25,6 +27,14 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_UPDATE_INTERVAL = timedelta(seconds=60)
 FAST_UPDATE_INTERVAL = timedelta(seconds=30)
 SLOW_UPDATE_INTERVAL = timedelta(seconds=120)
+
+# Force a fresh login if our cached session is older than this. Polling every
+# 30-120s keeps the session active so the router shouldn't naturally idle-time
+# us out, but routers may force-expire sessions on a max-age timer. 30 min is
+# a safe middle ground: low enough to avoid hitting most max-age limits,
+# high enough to drop auth-log noise from ~120/hr (per-poll spam) to ~2/hr.
+# The retry-once path below catches sessions that die earlier.
+SESSION_MAX_AGE = timedelta(minutes=30)
 
 
 class ZteDataCoordinator(DataUpdateCoordinator):
@@ -61,6 +71,26 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         self._stable_count = 0
         self._device_cache: dict[str, dict[str, Any]] = {}
         self._last_successful_update: datetime | None = None
+        self._last_login_at: datetime | None = None
+        # Serializes ALL access to self.client across the coordinator polling
+        # loop, the reboot service, the options-update reauth path, and
+        # pause_scanning. The underlying requests.Session is not thread-safe and
+        # the router daemon will emit "Client token is not equal to server
+        # token" if two flows step on each other.
+        self._client_lock = asyncio.Lock()
+        # Opt-in session reuse: user-configurable per integration entry via the
+        # options flow. Off by default so existing users keep the original
+        # upstream login/fetch/logout flow. Enabling it eliminates the
+        # per-poll login/logout pairs on firmwares (e.g. F6600P) where the
+        # upstream login_need_refresh short-circuit fails. The fallback path
+        # in _fetch_router_data_reuse handles stale sessions, so this is safe
+        # to try on any model.
+        self._reuse_session = bool(
+            entry.options.get(
+                CONF_SESSION_REUSE,
+                entry.data.get(CONF_SESSION_REUSE, DEFAULT_SESSION_REUSE),
+            )
+        )
 
         super().__init__(
             hass,
@@ -86,10 +116,27 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         return self._register_new_devices
 
     def pause_scanning(self) -> None:
-        """Pause device scanning."""
+        """Pause device scanning.
+
+        Schedules the logout in the executor so we never block the event loop
+        on router I/O, and serializes against the polling loop via the client
+        lock.
+        """
         self._paused = True
-        self.client.logout()
         _LOGGER.info("ZTE tracker scanning paused")
+
+        async def _bg_logout() -> None:
+            async with self._client_lock:
+                try:
+                    await asyncio.wait_for(
+                        self.hass.async_add_executor_job(self.client.logout),
+                        timeout=5,
+                    )
+                except Exception as ex:  # noqa: BLE001
+                    _LOGGER.debug("pause_scanning logout error: %s", ex)
+                self._last_login_at = None
+
+        self.hass.async_create_background_task(_bg_logout(), "zte_tracker_pause_logout")
 
     def resume_scanning(self) -> None:
         """Resume device scanning."""
@@ -141,7 +188,11 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 _LOGGER.error("Failed to reboot router: %s", ex)
                 return False
 
-        return await self.hass.async_add_executor_job(_reboot)
+        async with self._client_lock:
+            result = await self.hass.async_add_executor_job(_reboot)
+            # Reboot invalidates any session we held.
+            self._last_login_at = None
+            return result
 
     def _merge_device_data(self, new_devices: list[dict[str, Any]]) -> dict[str, Any]:
         """Merge new device data with cached data for better stability."""
@@ -210,12 +261,17 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 },
             }
 
-        def _fetch_router_data() -> tuple[
+        def _fetch_router_data_legacy() -> tuple[
             list[dict[str, Any]] | None,
             dict[str, Any] | None,
             dict[str, Any] | None,
         ]:
-            """Fetch router data in executor."""
+            """Original upstream fetch path: login -> fetch -> logout per poll.
+
+            Used when the session_reuse option is disabled (default) so we
+            don't change behaviour for users who haven't opted in to the
+            session-reuse experiment.
+            """
             try:
                 if not self.client.login():
                     _LOGGER.warning(
@@ -226,7 +282,6 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 devices = self.client.get_devices_response()
                 wanstatus = self.client.get_wan_status()
                 routerdetails = self.client.get_router_details()
-
                 return devices, wanstatus, routerdetails
             except Exception as ex:
                 _LOGGER.error("Error fetching device data: %s", ex)
@@ -237,9 +292,125 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 except Exception:
                     pass
 
-        devices, wanstatus, routerdetails = await self.hass.async_add_executor_job(
-            _fetch_router_data
+        def _fetch_router_data_reuse() -> tuple[
+            list[dict[str, Any]] | None,
+            dict[str, Any] | None,
+            dict[str, Any] | None,
+        ]:
+            """Session-reuse fetch path (opt-in via the session_reuse option).
+
+            Reuses the existing client session across polls to avoid spamming
+            the router auth log with login/logout pairs. If the cached session
+            is stale (router idle-timed it out), the first fetch will fail; we
+            then force a logout+login and retry once within the same cycle so
+            we don't burn a whole polling interval on a recoverable hiccup.
+            """
+
+            # Proactive session refresh: if we've been holding the same
+            # session longer than SESSION_MAX_AGE, force a clean re-login
+            # before the router idle-times us out and the first attempt
+            # below silently fails.
+            now = datetime.now()
+            if (
+                self._last_login_at is not None
+                and now - self._last_login_at > SESSION_MAX_AGE
+            ):
+                _LOGGER.debug(
+                    "Session age %s exceeds %s; proactively re-authenticating",
+                    now - self._last_login_at,
+                    SESSION_MAX_AGE,
+                )
+                try:
+                    self.client.logout()
+                except Exception:
+                    pass
+                self._last_login_at = None
+
+            def _attempt() -> tuple[
+                list[dict[str, Any]] | None,
+                dict[str, Any] | None,
+                dict[str, Any] | None,
+                bool,
+            ]:
+                try:
+                    have_session = (
+                        self.client.login_data is not None
+                        and self.client.session is not None
+                        and self._last_login_at is not None
+                    )
+
+                    if have_session:
+                        _LOGGER.debug("Reusing existing router session")
+                    else:
+                        if not self.client.login():
+                            _LOGGER.debug(
+                                "Login failed: %s@%s",
+                                self.client.username,
+                                self.client.host,
+                            )
+                            return None, None, None, False
+                        _LOGGER.debug("Fresh router login established")
+                        self._last_login_at = datetime.now()
+
+                    devices = self.client.get_devices_response()
+                    if devices is None:
+                        return None, None, None, False
+
+                    # Stale-session safety net: if we reused a cached session
+                    # and got back an empty device list, the router likely
+                    # served us a redirect-to-login page (HTTP 200 with login
+                    # HTML) instead of real data. Real-world router always has
+                    # at least the HA host itself + the gateway visible, so an
+                    # empty list on a reused session is a strong stale-session
+                    # signal -> trigger the retry-once path with a fresh login.
+                    if have_session and len(devices) == 0:
+                        _LOGGER.debug(
+                            "Empty device list on reused session; treating as stale"
+                        )
+                        return None, None, None, False
+
+                    wanstatus = self.client.get_wan_status()
+                    routerdetails = self.client.get_router_details()
+                    return devices, wanstatus, routerdetails, True
+                except Exception as ex:
+                    _LOGGER.debug("Fetch attempt error: %s", ex)
+                    return None, None, None, False
+
+            devices, wanstatus, routerdetails, ok = _attempt()
+
+            if not ok:
+                _LOGGER.debug(
+                    "Initial fetch failed; reauthenticating and retrying once"
+                )
+                try:
+                    self.client.logout()
+                except Exception:
+                    pass
+                self._last_login_at = None
+                devices, wanstatus, routerdetails, ok = _attempt()
+                if not ok:
+                    _LOGGER.warning(
+                        "Login/fetch failed after retry: %s@%s",
+                        self.client.username,
+                        self.client.host,
+                    )
+                    # Clear session state so next cycle starts fresh
+                    try:
+                        self.client.logout()
+                    except Exception:
+                        pass
+                    self._last_login_at = None
+
+            return devices, wanstatus, routerdetails
+
+        _fetch_router_data = (
+            _fetch_router_data_reuse if self._reuse_session else _fetch_router_data_legacy
         )
+
+        async with self._client_lock:
+            devices, wanstatus, routerdetails = await self.hass.async_add_executor_job(
+                _fetch_router_data
+            )
 
         if devices is None:
             self._available = False

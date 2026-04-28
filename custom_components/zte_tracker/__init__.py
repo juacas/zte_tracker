@@ -18,8 +18,10 @@ import voluptuous as vol
 from .const import (
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
+    CONF_SESSION_REUSE,
     DEFAULT_QUERY_ROUTER_DETAILS,
     DEFAULT_QUERY_WAN_STATUS,
+    DEFAULT_SESSION_REUSE,
     DOMAIN,
     PLATFORMS,
 )
@@ -67,7 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data_copy = dict(entry.data)
         options_copy = dict(entry.options) if entry.options is not None else {}
         migrated = False
-        for key in (CONF_QUERY_WAN_STATUS, CONF_QUERY_ROUTER_DETAILS):
+        for key in (CONF_QUERY_WAN_STATUS, CONF_QUERY_ROUTER_DETAILS, CONF_SESSION_REUSE):
             if key in data_copy and key not in options_copy:
                 options_copy[key] = data_copy.pop(key)
                 migrated = True
@@ -116,6 +118,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 CONF_QUERY_ROUTER_DETAILS, DEFAULT_QUERY_ROUTER_DETAILS
             ),
         )
+        new_session_reuse = bool(
+            updated_entry.options.get(
+                CONF_SESSION_REUSE,
+                updated_entry.data.get(CONF_SESSION_REUSE, DEFAULT_SESSION_REUSE),
+            )
+        )
+
+        # session_reuse is wired into the coordinator at __init__ time (it
+        # selects between two distinct fetch code paths). Toggling it at
+        # runtime requires a full reload so the new path is in effect.
+        if bool(getattr(coordinator, "_reuse_session", False)) != new_session_reuse:
+            _LOGGER.info(
+                "session_reuse changed to %s; reloading entry %s",
+                new_session_reuse,
+                updated_entry.entry_id,
+            )
+            await async_reload_entry(hass, updated_entry)
+            return
 
         # Apply to existing client
         client = getattr(coordinator, "client", None)
@@ -138,7 +158,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        # Best-effort: cleanly close the persistent router session so we don't
+        # leave a stale logged-in session on the device. Wrapped in timeout
+        # and broad exception catch so a hung/dead router can never block or
+        # fail HA unload/restart.
+        if coordinator is not None and getattr(coordinator, "client", None):
+            import asyncio
+
+            async def _safe_logout() -> None:
+                try:
+                    async with coordinator._client_lock:
+                        await asyncio.wait_for(
+                            hass.async_add_executor_job(coordinator.client.logout),
+                            timeout=3,
+                        )
+                except Exception as ex:  # noqa: BLE001
+                    _LOGGER.debug("Ignoring logout error during unload: %s", ex)
+
+            await _safe_logout()
 
     return unload_ok
 

@@ -17,10 +17,12 @@ import voluptuous as vol
 from .const import (
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
+    CONF_SESSION_REUSE,
     DEFAULT_HOST,
     DEFAULT_PASSWORD,
     DEFAULT_QUERY_ROUTER_DETAILS,
     DEFAULT_QUERY_WAN_STATUS,
+    DEFAULT_SESSION_REUSE,
     DEFAULT_USERNAME,
     DOMAIN,
 )
@@ -86,6 +88,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         ): cv.boolean,
         vol.Required(
             CONF_QUERY_ROUTER_DETAILS, default=DEFAULT_QUERY_ROUTER_DETAILS
+        ): cv.boolean,
+        vol.Required(
+            CONF_SESSION_REUSE, default=DEFAULT_SESSION_REUSE
         ): cv.boolean,
     }
 )
@@ -220,6 +225,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_QUERY_ROUTER_DETAILS, DEFAULT_QUERY_ROUTER_DETAILS
                     ),
                 ): cv.boolean,
+                vol.Required(
+                    CONF_SESSION_REUSE,
+                    default=defaults.get(
+                        CONF_SESSION_REUSE, DEFAULT_SESSION_REUSE
+                    ),
+                ): cv.boolean,
             }
         )
         return self.async_show_form(
@@ -263,12 +274,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_QUERY_ROUTER_DETAILS, DEFAULT_QUERY_ROUTER_DETAILS
             ),
         )
+        current_session_reuse = self._config_entry.options.get(
+            CONF_SESSION_REUSE,
+            self._config_entry.data.get(
+                CONF_SESSION_REUSE, DEFAULT_SESSION_REUSE
+            ),
+        )
 
         data_schema = vol.Schema(
             {
                 vol.Required(CONF_QUERY_WAN_STATUS, default=current_wan): cv.boolean,
                 vol.Required(
                     CONF_QUERY_ROUTER_DETAILS, default=current_router
+                ): cv.boolean,
+                vol.Required(
+                    CONF_SESSION_REUSE, default=current_session_reuse
                 ): cv.boolean,
             }
         )
