@@ -1,4 +1,9 @@
 # Release Notes
+## v2.0.16
+### Added
+Eliminate the ~120 login/logout pairs per hour (and occasional Client token is not equal to server token daemon errors) that the current login_need_refresh short-circuit causes on this hardware. Behaviour: defaults to off, so existing installs are unchanged.
+Anyone can enable it by checking "Reuse session across polls" in the integration options. The robust fallback (stale-session retry-once + proactive refresh after SESSION_MAX_AGE) is unchanged, so users on other models can safely experiment. Thanks to @lebdim for the contribution! [#57](https://github.com/juacas/zte_tracker/issues/57)
+
 ## v2.0.14
 ### Added
 - Support for ZTE F680 router model.

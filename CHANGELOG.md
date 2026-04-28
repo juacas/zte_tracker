@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## v2.0.16
+### Added
+- Eliminate the ~120 login/logout pairs per hour (and occasional Client token is not equal to server token daemon errors) that the current login_need_refresh short-circuit causes on this hardware. Behaviour: defaults to off, so existing installs are unchanged. Anyone can enable it by checking "Reuse session across polls" in the integration options. The robust fallback (stale-session retry-once + proactive refresh after SESSION_MAX_AGE) is unchanged, so users on other models can safely experiment. Thanks to @lebdim for the contribution! [#57](https://github.com/juacas/zte_tracker/issues/57)
+
+## v2.0.14
+### Added
+- Support for ZTE F680 router model.
+- Fix instance creation with wan status and router details queries enabled. Thanks to @GrzegorzWalewski and @risalt for reporting! [#55](https://github.com/juacas/zte_tracker/issues/55)
 
 ## v2.0.13
 ### Added
