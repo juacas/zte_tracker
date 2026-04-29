@@ -258,10 +258,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Manage the options flow."""
         errors: dict[str, str] = {}
 
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
-        # Defaults come from options, then stored data, then module defaults
+        # Current values, used both as form defaults and as the comparison
+        # baseline to decide whether router credentials/host changed and thus
+        # a connection re-validation + entry data update is needed.
+        current_host = self._config_entry.data.get(CONF_HOST, DEFAULT_HOST)
+        current_username = self._config_entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)
+        current_password = self._config_entry.data.get(CONF_PASSWORD, DEFAULT_PASSWORD)
+        current_model = self._config_entry.data.get(CONF_MODEL, "F6640")
         current_wan = self._config_entry.options.get(
             CONF_QUERY_WAN_STATUS,
             self._config_entry.data.get(
@@ -281,8 +284,125 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             ),
         )
 
+        if user_input is not None:
+            new_host = user_input.get(CONF_HOST, current_host)
+            new_username = user_input.get(CONF_USERNAME, current_username)
+            new_password = user_input.get(CONF_PASSWORD, current_password)
+            credentials_changed = (
+                new_host != current_host
+                or new_username != current_username
+                or new_password != current_password
+            )
+
+            # Per-field validation (mirrors async_step_user)
+            try:
+                new_host = validate_host(new_host)
+            except vol.Invalid:
+                errors[CONF_HOST] = "invalid_host"
+            try:
+                new_username = validate_username(new_username)
+            except vol.Invalid:
+                errors[CONF_USERNAME] = "invalid_username"
+            try:
+                new_password = validate_password(new_password)
+            except vol.Invalid:
+                errors[CONF_PASSWORD] = "invalid_password"
+
+            if not errors:
+                # Only test the router when credentials/host actually changed
+                # so toggling the boolean options alone never hits the network.
+                if credentials_changed:
+                    try:
+                        await validate_input(
+                            self.hass,
+                            {
+                                CONF_HOST: new_host,
+                                CONF_USERNAME: new_username,
+                                CONF_PASSWORD: new_password,
+                                CONF_MODEL: current_model,
+                                CONF_QUERY_WAN_STATUS: bool(
+                                    user_input.get(
+                                        CONF_QUERY_WAN_STATUS, current_wan
+                                    )
+                                ),
+                                CONF_QUERY_ROUTER_DETAILS: bool(
+                                    user_input.get(
+                                        CONF_QUERY_ROUTER_DETAILS, current_router
+                                    )
+                                ),
+                            },
+                        )
+                    except ConnectionError as ex:
+                        errors["base"] = "cannot_connect"
+                        _LOGGER.warning(
+                            "Options flow credential validation failed: %s", ex
+                        )
+                    except Exception:  # pylint: disable=broad-except
+                        _LOGGER.exception(
+                            "Unexpected error validating new ZTE credentials"
+                        )
+                        errors["base"] = "unknown"
+
+                if not errors:
+                    # Persist credential/host changes to entry.data so the
+                    # coordinator picks them up after reload. unique_id stays
+                    # the same so existing device_tracker entities/history
+                    # are preserved.
+                    if credentials_changed:
+                        new_data = {
+                            **self._config_entry.data,
+                            CONF_HOST: new_host,
+                            CONF_USERNAME: new_username,
+                            CONF_PASSWORD: new_password,
+                        }
+                        self.hass.config_entries.async_update_entry(
+                            self._config_entry, data=new_data
+                        )
+                        # Schedule reload so the new credentials take effect.
+                        # Done via the scheduler (not awaited here) to avoid
+                        # racing with the options-update listener registered
+                        # in __init__.async_setup_entry.
+                        self.hass.config_entries.async_schedule_reload(
+                            self._config_entry.entry_id
+                        )
+
+                    # Options-only payload (booleans). Credentials live in
+                    # entry.data, not options, to keep a single source of truth.
+                    options_payload = {
+                        CONF_QUERY_WAN_STATUS: bool(
+                            user_input.get(CONF_QUERY_WAN_STATUS, current_wan)
+                        ),
+                        CONF_QUERY_ROUTER_DETAILS: bool(
+                            user_input.get(
+                                CONF_QUERY_ROUTER_DETAILS, current_router
+                            )
+                        ),
+                        CONF_SESSION_REUSE: bool(
+                            user_input.get(
+                                CONF_SESSION_REUSE, current_session_reuse
+                            )
+                        ),
+                    }
+                    return self.async_create_entry(title="", data=options_payload)
+
+            # Re-render with submitted values so the user does not have to
+            # retype on validation error.
+            current_host = new_host
+            current_username = new_username
+            current_password = new_password
+            current_wan = bool(user_input.get(CONF_QUERY_WAN_STATUS, current_wan))
+            current_router = bool(
+                user_input.get(CONF_QUERY_ROUTER_DETAILS, current_router)
+            )
+            current_session_reuse = bool(
+                user_input.get(CONF_SESSION_REUSE, current_session_reuse)
+            )
+
         data_schema = vol.Schema(
             {
+                vol.Required(CONF_HOST, default=current_host): cv.string,
+                vol.Required(CONF_USERNAME, default=current_username): cv.string,
+                vol.Required(CONF_PASSWORD, default=current_password): cv.string,
                 vol.Required(CONF_QUERY_WAN_STATUS, default=current_wan): cv.boolean,
                 vol.Required(
                     CONF_QUERY_ROUTER_DETAILS, default=current_router
