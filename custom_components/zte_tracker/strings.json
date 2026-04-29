@@ -12,7 +12,7 @@
           "model": "Router Model",
           "query_wan_status": "Query WAN status",
           "query_router_details": "Query router details",
-          "session_reuse": "Reuse router session across polls (reduces auth-log noise; recommended for F6600P)"
+          "session_reuse": "Reuse router session across polls (reduces login spam in router logs; recommended if your router logs an auth event on every poll)"
         }
       }
     },
@@ -38,7 +38,7 @@
           "model": "Router Model",
           "query_wan_status": "Query WAN status",
           "query_router_details": "Query router details",
-          "session_reuse": "Reuse router session across polls (reduces auth-log noise; recommended for F6600P)"
+          "session_reuse": "Reuse router session across polls (reduces login spam in router logs; recommended if your router logs an auth event on every poll)"
         }
       }
     }

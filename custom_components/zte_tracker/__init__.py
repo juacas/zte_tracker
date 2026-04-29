@@ -130,11 +130,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # runtime requires a full reload so the new path is in effect.
         if bool(getattr(coordinator, "_reuse_session", False)) != new_session_reuse:
             _LOGGER.info(
-                "session_reuse changed to %s; reloading entry %s",
+                "session_reuse changed to %s; scheduling reload of entry %s",
                 new_session_reuse,
                 updated_entry.entry_id,
             )
-            await async_reload_entry(hass, updated_entry)
+            # Use HA's scheduler so the reload runs outside this update
+            # listener callback under entry.setup_lock — avoids re-entrancy
+            # races that surface as "Config entry was never loaded!" when
+            # platforms are unloaded twice. See issue #59.
+            hass.config_entries.async_schedule_reload(updated_entry.entry_id)
             return
 
         # Apply to existing client
@@ -148,9 +152,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await coordinator.async_request_refresh()
         except Exception:
             # If refresh fails, schedule a full reload of the entry
-            await async_reload_entry(hass, updated_entry)
+            hass.config_entries.async_schedule_reload(updated_entry.entry_id)
 
-    entry.add_update_listener(_async_options_updated)
+    # Register listener via async_on_unload so HA removes it on unload —
+    # otherwise the listener accumulates on every reload, producing N
+    # concurrent reload tasks on the next options change.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     return True
 
@@ -179,12 +186,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await _safe_logout()
 
     return unload_ok
-
-
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry."""
-    await async_unload_entry(hass, entry)
-    await async_setup_entry(hass, entry)
 
 
 REBOOT_SERVICE_SCHEMA = vol.Schema(

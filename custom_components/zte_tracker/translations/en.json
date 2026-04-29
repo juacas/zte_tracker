@@ -1,0 +1,66 @@
+{
+  "title": "ZTE Tracker",
+  "config": {
+    "step": {
+      "user": {
+        "title": "ZTE Router Configuration",
+        "description": "Configure your ZTE router for device tracking",
+        "data": {
+          "host": "Router IP Address",
+          "username": "Username",
+          "password": "Password",
+          "model": "Router Model",
+          "query_wan_status": "Query WAN status",
+          "query_router_details": "Query router details",
+          "session_reuse": "Reuse router session across polls (reduces login spam in router logs; recommended if your router logs an auth event on every poll)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the router. Please check your settings.",
+      "invalid_input": "Invalid input provided. Please check your entries.",
+      "invalid_model": "Selected router model is not supported.",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "Router is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ZTE Router Options",
+        "description": "Update ZTE router configuration",
+        "data": {
+          "host": "Router IP Address",
+          "username": "Username",
+          "password": "Password",
+          "model": "Router Model",
+          "query_wan_status": "Query WAN status",
+          "query_router_details": "Query router details",
+          "session_reuse": "Reuse router session across polls (reduces login spam in router logs; recommended if your router logs an auth event on every poll)"
+        }
+      }
+    }
+  },
+  "services": {
+    "reboot": {
+      "name": "Reboot router",
+      "description": "Reboot the ZTE router. Optionally specify a hostname to reboot only that router."
+    },
+    "remove_tracked_entity": {
+      "name": "Remove tracked device",
+      "description": "Remove a tracked device entity by MAC address.",
+      "fields": {
+        "mac": {
+          "name": "MAC Address",
+          "description": "MAC address of the device to remove (e.g. E4:BC:AA:0D:B8:F6)"
+        }
+      }
+    },
+    "remove_unidentified_entities": {
+      "name": "Remove unidentified device_tracker entities",
+      "description": "Remove all device_tracker entities that have no unique_id."
+    }
+  }
+}
