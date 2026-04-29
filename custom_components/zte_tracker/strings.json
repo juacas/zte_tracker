@@ -41,6 +41,13 @@
           "session_reuse": "Reuse router session across polls (reduces auth-log noise; recommended for F6600P)"
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the router with the new settings. Please check host, username and password.",
+      "invalid_host": "Invalid host address",
+      "invalid_username": "Invalid username",
+      "invalid_password": "Invalid password",
+      "unknown": "Unexpected error occurred"
     }
   },
   "services": {
