@@ -16,9 +16,11 @@ from homeassistant.helpers.typing import ConfigType
 import voluptuous as vol
 
 from .const import (
+    CONF_MESH_TOPOLOGY,
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
     CONF_SESSION_REUSE,
+    DEFAULT_MESH_TOPOLOGY,
     DEFAULT_QUERY_ROUTER_DETAILS,
     DEFAULT_QUERY_WAN_STATUS,
     DEFAULT_SESSION_REUSE,
@@ -141,11 +143,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.config_entries.async_schedule_reload(updated_entry.entry_id)
             return
 
+        # mesh_topology can be toggled at runtime without reload
+        new_mesh_topology = bool(
+            updated_entry.options.get(
+                CONF_MESH_TOPOLOGY,
+                updated_entry.data.get(CONF_MESH_TOPOLOGY, DEFAULT_MESH_TOPOLOGY),
+            )
+        )
+        coordinator._mesh_topology = new_mesh_topology
+
         # Apply to existing client
         client = getattr(coordinator, "client", None)
         if client:
             client.query_wan_status = bool(query_wan)
             client.query_router_details = bool(query_router)
+            if client.mesh_topology != new_mesh_topology:
+                # mesh_topology change requires session re-init (page load +
+                # headers differ). Force logout so next poll creates a fresh
+                # session with the correct setup.
+                client.mesh_topology = new_mesh_topology
+                try:
+                    async with coordinator._client_lock:
+                        await hass.async_add_executor_job(client.logout)
+                        coordinator._last_login_at = None
+                except Exception:
+                    pass
+            else:
+                client.mesh_topology = new_mesh_topology
 
         # Request an immediate refresh so the new options take effect
         try:

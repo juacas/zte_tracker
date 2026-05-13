@@ -60,3 +60,9 @@ DEFAULT_QUERY_ROUTER_DETAILS = True
 # users keep the original upstream login/fetch/logout flow unchanged.
 CONF_SESSION_REUSE = "session_reuse"
 DEFAULT_SESSION_REUSE = False
+
+# Opt-in flag: query the mesh topology endpoint for full device visibility
+# across all mesh nodes. Requires a separate HTTP session (plain HTTP, not
+# HTTPS) to the router. Only effective on models with topo_data_tag config.
+CONF_MESH_TOPOLOGY = "mesh_topology"
+DEFAULT_MESH_TOPOLOGY = False

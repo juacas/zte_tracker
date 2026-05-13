@@ -15,10 +15,12 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 from .const import (
+    CONF_MESH_TOPOLOGY,
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
     CONF_SESSION_REUSE,
     DEFAULT_HOST,
+    DEFAULT_MESH_TOPOLOGY,
     DEFAULT_PASSWORD,
     DEFAULT_QUERY_ROUTER_DETAILS,
     DEFAULT_QUERY_WAN_STATUS,
@@ -283,6 +285,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_SESSION_REUSE, DEFAULT_SESSION_REUSE
             ),
         )
+        current_mesh_topology = self._config_entry.options.get(
+            CONF_MESH_TOPOLOGY,
+            self._config_entry.data.get(
+                CONF_MESH_TOPOLOGY, DEFAULT_MESH_TOPOLOGY
+            ),
+        )
 
         if user_input is not None:
             new_host = user_input.get(CONF_HOST, current_host)
@@ -382,6 +390,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                                 CONF_SESSION_REUSE, current_session_reuse
                             )
                         ),
+                        CONF_MESH_TOPOLOGY: bool(
+                            user_input.get(
+                                CONF_MESH_TOPOLOGY, current_mesh_topology
+                            )
+                        ),
                     }
                     return self.async_create_entry(title="", data=options_payload)
 
@@ -397,6 +410,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             current_session_reuse = bool(
                 user_input.get(CONF_SESSION_REUSE, current_session_reuse)
             )
+            current_mesh_topology = bool(
+                user_input.get(CONF_MESH_TOPOLOGY, current_mesh_topology)
+            )
 
         data_schema = vol.Schema(
             {
@@ -409,6 +425,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): cv.boolean,
                 vol.Required(
                     CONF_SESSION_REUSE, default=current_session_reuse
+                ): cv.boolean,
+                vol.Required(
+                    CONF_MESH_TOPOLOGY, default=current_mesh_topology
                 ): cv.boolean,
             }
         )

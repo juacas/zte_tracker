@@ -233,6 +233,7 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
             "port": device.get("port"),
             "link_time": device.get("LinkTime"),
             "connect_time": device.get("ConnectTime"),
+            "mesh_node": device.get("mesh_node"),
         }
 
     async def async_added_to_hass(self) -> None:

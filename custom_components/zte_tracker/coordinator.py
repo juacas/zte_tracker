@@ -13,10 +13,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CONF_MESH_TOPOLOGY,
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
     CONF_REGISTER_NEW_DEVICES,
     CONF_SESSION_REUSE,
+    DEFAULT_MESH_TOPOLOGY,
     DEFAULT_SESSION_REUSE,
     DOMAIN,
 )
@@ -55,6 +57,13 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         query_wan = bool(query_wan) if query_wan is not None else True
         query_router = bool(query_router) if query_router is not None else True
 
+        self._mesh_topology = bool(
+            entry.options.get(
+                CONF_MESH_TOPOLOGY,
+                entry.data.get(CONF_MESH_TOPOLOGY, DEFAULT_MESH_TOPOLOGY),
+            )
+        )
+
         self.client = zteClient(
             entry.data[CONF_HOST],
             entry.data[CONF_USERNAME],
@@ -63,6 +72,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             verify_ssl=False,
             query_wan_status=query_wan,
             query_router_details=query_router,
+            mesh_topology=self._mesh_topology,
         )
         self._available = True
         self._paused = False
@@ -72,19 +82,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         self._device_cache: dict[str, dict[str, Any]] = {}
         self._last_successful_update: datetime | None = None
         self._last_login_at: datetime | None = None
-        # Serializes ALL access to self.client across the coordinator polling
-        # loop, the reboot service, the options-update reauth path, and
-        # pause_scanning. The underlying requests.Session is not thread-safe and
-        # the router daemon will emit "Client token is not equal to server
-        # token" if two flows step on each other.
         self._client_lock = asyncio.Lock()
-        # Opt-in session reuse: user-configurable per integration entry via the
-        # options flow. Off by default so existing users keep the original
-        # upstream login/fetch/logout flow. Enabling it eliminates the
-        # per-poll login/logout pairs on firmwares (e.g. F6600P) where the
-        # upstream login_need_refresh short-circuit fails. The fallback path
-        # in _fetch_router_data_reuse handles stale sessions, so this is safe
-        # to try on any model.
         self._reuse_session = bool(
             entry.options.get(
                 CONF_SESSION_REUSE,
@@ -206,6 +204,55 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             self._last_login_at = None
             return result
 
+    def _enrich_topology(
+        self,
+        topo_devices: list[dict[str, Any]],
+        legacy_devices: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Enrich topology devices with SSID and metadata from legacy data.
+
+        Only replaces legacy list if topology has at least as many devices.
+        """
+        # Safety: don't replace if topology returned fewer devices
+        if len(topo_devices) < len(legacy_devices):
+            _LOGGER.warning(
+                "Topology has fewer devices (%d) than legacy (%d); using legacy",
+                len(topo_devices),
+                len(legacy_devices),
+            )
+            return legacy_devices
+
+        legacy_by_mac = {d.get("MACAddress", ""): d for d in legacy_devices}
+
+        # Phase 1: merge known fields by MAC
+        for td in topo_devices:
+            legacy = legacy_by_mac.get(td.get("MACAddress", ""))
+            if legacy:
+                if legacy.get("Port"):
+                    td["Port"] = legacy["Port"]
+                if legacy.get("ConnectTime"):
+                    td["ConnectTime"] = legacy["ConnectTime"]
+                if legacy.get("LinkTime"):
+                    td["LinkTime"] = legacy["LinkTime"]
+
+        # Phase 2: propagate SSID to agent devices by AccessType
+        ssid_by_access: dict[str, str] = {}
+        for td in topo_devices:
+            port = td.get("Port", "")
+            access = td.get("_AccessType", "")
+            if port and access and access not in ssid_by_access:
+                ssid_by_access[access] = port
+        for td in topo_devices:
+            if not td.get("Port") and td.get("_AccessType"):
+                td["Port"] = ssid_by_access.get(td["_AccessType"], "")
+
+        _LOGGER.info(
+            "Mesh topology: %d devices (was %d from legacy)",
+            len(topo_devices),
+            len(legacy_devices),
+        )
+        return topo_devices
+
     def _merge_device_data(self, new_devices: list[dict[str, Any]]) -> dict[str, Any]:
         """Merge new device data with cached data for better stability."""
         processed_devices = {}
@@ -229,6 +276,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 "port": device.get("Port", ""),  # LAN port or WLAN ESSID
                 "LinkTime": device.get("LinkTime", ""),
                 "ConnectTime": device.get("ConnectTime", ""),
+                "mesh_node": device.get("MeshNode", ""),
             }
 
             # Merge with cached data if available
@@ -294,6 +342,13 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 devices = self.client.get_devices_response()
                 wanstatus = self.client.get_wan_status()
                 routerdetails = self.client.get_router_details()
+
+                # Mesh topology enrichment (before logout!)
+                if devices is not None and self._mesh_topology:
+                    topo = self.client._try_topology()
+                    if topo:
+                        devices = self._enrich_topology(topo, devices)
+
                 return devices, wanstatus, routerdetails
             except Exception as ex:
                 _LOGGER.error("Error fetching device data: %s", ex)
@@ -383,6 +438,13 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
                     wanstatus = self.client.get_wan_status()
                     routerdetails = self.client.get_router_details()
+
+                    # Mesh topology enrichment (session still alive)
+                    if devices is not None and self._mesh_topology:
+                        topo = self.client._try_topology()
+                        if topo:
+                            devices = self._enrich_topology(topo, devices)
+
                     return devices, wanstatus, routerdetails, True
                 except Exception as ex:
                     _LOGGER.debug("Fetch attempt error: %s", ex)

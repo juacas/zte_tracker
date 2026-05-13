@@ -7,6 +7,7 @@ from os import error
 
 import base64
 import hashlib
+import json
 import logging
 import time
 from typing import Any
@@ -38,6 +39,8 @@ _MODELS = {
         "type_main_request": "menuData",
         "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
         "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
+        "topo_data_tag": "topo_lua.lua",
+        "default_scheme": "https",
     },
     "H288A": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
@@ -48,6 +51,7 @@ _MODELS = {
         "type_main_request": "menuData",
         "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
         "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
+        "default_scheme": "https",
     },
     "H388X": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
@@ -58,6 +62,7 @@ _MODELS = {
         "type_main_request": "menuData",
         "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
         "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1",  # Reported in #44 wan_internetstatus_lua does not work on H388X
+        "default_scheme": "https",
     },
     "E2631": {
         "wlan_script": "vue_client_data",
@@ -68,6 +73,7 @@ _MODELS = {
         "type_main_request": "vueData",
         "tag_wan_status_view": "vue_home_device_data_no_update_sess",
         "tag_wan_status_data": "vue_mainwan_data",
+        "default_scheme": "https",
     },
 }
 
@@ -97,6 +103,8 @@ class zteClient:
         verify_ssl: bool = False,
         query_wan_status: bool = DEFAULT_QUERY_WAN_STATUS,
         query_router_details: bool = DEFAULT_QUERY_ROUTER_DETAILS,
+        scheme: str = "auto",
+        mesh_topology: bool = False,
     ) -> None:
         """Initialize the client."""
         self.statusmsg: str | None = None
@@ -106,6 +114,7 @@ class zteClient:
         # Flags to enable/disable optional router queries
         self.query_wan_status = bool(query_wan_status)
         self.query_router_details = bool(query_router_details)
+        self.mesh_topology = bool(mesh_topology)
         self.session: Session | None = None
         self.login_data: dict[str, Any] | None = None
         self.status = "on"
@@ -113,7 +122,13 @@ class zteClient:
         self.guid = int(time.time() * 1000)
         self.model = model
         self.paths = _MODELS[model]
-        self.verify_ssl = verify_ssl
+        # Resolve scheme: "auto" uses model default, else user override
+        if scheme == "auto":
+            self.scheme = self.paths.get("default_scheme", "https")
+        else:
+            self.scheme = scheme
+        self.base_url = f"{self.scheme}://{self.host}"
+        self.verify_ssl = verify_ssl if self.scheme == "https" else False
 
     @staticmethod
     def get_models() -> list[str]:
@@ -142,7 +157,25 @@ class zteClient:
                 "DNT": "1",
             }
         )
-        # self.session.cookies.set("_TESTCOOKIESUPPORT", "1")
+
+        if self.mesh_topology:
+            # Mesh topology requires browser-like session initialization:
+            # 1. Page load to set cookies (_TESTCOOKIESUPPORT / SID)
+            # 2. XHR headers for subsequent API calls
+            # Without this, topology endpoint returns SessionTimeout.
+            try:
+                self.session.get(
+                    f"{self.base_url}/", verify=self.verify_ssl, timeout=10
+                )
+            except Exception:
+                pass  # Best-effort; login will fail later if unreachable
+
+            self.session.headers.update(
+                {
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": f"{self.base_url}/",
+                }
+            )
 
     def login(self) -> bool:
         """Login procedure using ZTE challenge. Returns True if successful, False otherwise. Sets statusmsg for error reporting."""
@@ -170,7 +203,7 @@ class zteClient:
             # Step2: Query for login token
             try:
                 r = self.session.get(
-                    f"https://{self.host}/?_type=loginData&_tag=login_token&_={self.get_guid()}",
+                    f"{self.base_url}/?_type=loginData&_tag=login_token&_={self.get_guid()}",
                     verify=self.verify_ssl,
                     timeout=10,
                 )
@@ -211,7 +244,7 @@ class zteClient:
             password_param = hashlib.sha256(pass_hash.encode()).hexdigest()
             try:
                 r = self.session.post(
-                    f"https://{self.host}/?_type=loginData&_tag=login_entry",
+                    f"{self.base_url}/?_type=loginData&_tag=login_entry",
                     verify=self.verify_ssl,
                     timeout=10,
                     data={
@@ -241,6 +274,15 @@ class zteClient:
             # Handle refresh requirement
             if self.login_data.get("login_need_refresh") == 1:
                 _LOGGER.debug("Login refresh required")
+                if self.mesh_topology:
+                    try:
+                        self.session.get(
+                            f"{self.base_url}/",
+                            verify=self.verify_ssl,
+                            timeout=10,
+                        )
+                    except Exception:
+                        pass  # Best-effort reload
             # Check for error messaging.
             if self.login_data.get("lockingTime", 0) == -1:
                 self.statusmsg = f"Router is locked: {self.login_data.get('loginErrMsg', 'Unknown error')}"
@@ -282,7 +324,7 @@ class zteClient:
             raise RuntimeError("Session not initialized")
 
         r = self.session.get(
-            f"https://{self.host}/?_type=loginData&_tag=login_entry",
+            f"{self.base_url}/?_type=loginData&_tag=login_entry",
             verify=self.verify_ssl,
             timeout=10,
         )
@@ -305,7 +347,7 @@ class zteClient:
                 return
 
             r = self.session.post(
-                f"https://{self.host}?_type=loginData&_tag=logout_entry",
+                f"{self.base_url}?_type=loginData&_tag=logout_entry",
                 data={"IF_LogOff": "1"},
                 verify=self.verify_ssl,
                 timeout=10,
@@ -325,15 +367,13 @@ class zteClient:
     def get_devices_response(self) -> list[dict[str, Any]] | None:
         """Get the list of devices with connection reuse optimization."""
         try:
-            # Combine LAN and WiFi requests for efficiency
             lan_devices = self.get_lan_devices()
             wifi_devices = self.get_wifi_devices()
 
             if lan_devices is None and wifi_devices is None:
                 return None
 
-            # Combine results, handling None cases
-            devices = []
+            devices: list[dict[str, Any]] = []
             if lan_devices:
                 devices.extend(lan_devices)
             if wifi_devices:
@@ -353,7 +393,7 @@ class zteClient:
 
             # First request to set up context
             r = self.session.get(
-                f"https://{self.host}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
+                f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
                 verify=self.verify_ssl,
                 timeout=10,
             )
@@ -361,7 +401,7 @@ class zteClient:
             r.raise_for_status()
 
             # Main request for LAN devices
-            lan_request = f"https://{self.host}/?_type={self.paths['type_main_request']}&_tag={self.paths['lan_script']}&_={self.get_guid()}"
+            lan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['lan_script']}&_={self.get_guid()}"
             r = self.session.get(lan_request, verify=self.verify_ssl, timeout=10)
             self.log_request(r)
             r.raise_for_status()
@@ -385,19 +425,19 @@ class zteClient:
             # we can try to skip it for efficiency, but keep it for safety
             try:
                 # Try direct request first
-                wlan_request = f"https://{self.host}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
+                wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
             except Exception:
                 # Fallback to full setup if direct request fails
                 r = self.session.get(
-                    f"https://{self.host}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
+                    f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
                     verify=self.verify_ssl,
                     timeout=10,
                 )
                 r.raise_for_status()
 
-                wlan_request = f"https://{self.host}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
+                wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
 
@@ -411,6 +451,154 @@ class zteClient:
             _LOGGER.error(self.statusmsg)
             return None
 
+    def _try_topology(self) -> list[dict[str, Any]] | None:
+        """Fetch all devices via the mesh topology endpoint.
+
+        Uses the existing session to navigate to the topology page
+        (menuView mmTopology) and fetch device data (menuData
+        topo_lua.lua).  Requires ``mesh_topology=True`` so that
+        ``_setup_session()`` performed the initial page load and set
+        browser-like XHR headers.
+
+        Includes a circuit breaker: disables topology after 3
+        consecutive failures, resets after 5-minute cooldown.
+        """
+        topo_tag = self.paths.get("topo_data_tag")
+        if not topo_tag:
+            return None
+
+        # Circuit breaker
+        failures = getattr(self, "_topo_failures", 0)
+        if failures >= 3:
+            import time as _time
+            last_fail = getattr(self, "_topo_last_fail", 0)
+            if _time.time() - last_fail < 300:
+                return None
+            failures = 0
+            self._topo_failures = 0
+
+        if self.session:
+            return self._fetch_topology_inline(topo_tag, failures)
+        else:
+            return None
+
+    def _fetch_topology_inline(
+        self, topo_tag: str, failures: int
+    ) -> list[dict[str, Any]] | None:
+        """Fetch topology using the existing session (no extra login).
+
+        Navigates to the topology page via menuView, then fetches the
+        topology data — exactly as the browser does when switching tabs.
+        """
+        try:
+            # Navigate to topology context (like clicking "Topology" tab)
+            self.session.get(
+                f"{self.base_url}/?_type=menuView&_tag=mmTopology"
+                f"&Menu3Location=0&_={self.get_guid()}",
+                verify=self.verify_ssl,
+                timeout=10,
+            )
+
+            r = self.session.get(
+                f"{self.base_url}/?_type=menuData&_tag={topo_tag}"
+                f"&_={self.get_guid()}",
+                verify=self.verify_ssl,
+                timeout=10,
+            )
+            self.log_request(r)
+
+            text = r.text
+            if "SessionTimeout" in text or "<html" in text[:500].lower():
+                _LOGGER.debug("Topology inline: error response (len=%d)", len(text))
+                self._topo_failures = failures + 1; self._topo_last_fail = time.time()
+                return None
+
+            data = json.loads(text)
+            devices = self._parse_topology_json(data)
+            if devices:
+                _LOGGER.info("Topology returned %d mesh devices (inline)", len(devices))
+                self._topo_failures = 0
+                self.statusmsg = "OK"
+                return devices
+
+            _LOGGER.debug("Topology inline: valid JSON but no devices")
+            self._topo_failures = failures + 1; self._topo_last_fail = time.time()
+            return None
+
+        except json.JSONDecodeError:
+            _LOGGER.debug("Topology inline: non-JSON response")
+            self._topo_failures = failures + 1; self._topo_last_fail = time.time()
+            return None
+        except Exception as ex:
+            _LOGGER.debug("Topology inline failed: %s", ex)
+            self._topo_failures = failures + 1; self._topo_last_fail = time.time()
+            return None
+
+    def _parse_topology_json(self, data: dict) -> list[dict[str, Any]] | None:
+        """Parse mesh topology JSON into the standard device list format.
+
+        Expected JSON structure from ``topo_lua.lua``::
+
+            {
+              "slave": [{"instID": "MESH.AGENT1", ...}],
+              "master": {"instID": "MESH.CONTROLLER", ...},
+              "ad": {
+                "1": {"parent": "...", "MacAddr": "...", "IpAddr": "...",
+                      "HostName": "...", "AccessType": "0|1|2"},
+                "MGET_INST_NUM": 30
+              }
+            }
+
+        AccessType: ``"0"`` = LAN, ``"1"`` = 2.4 GHz WiFi, ``"2"`` = 5 GHz WiFi.
+        """
+        ad = data.get("ad")
+        if not ad or not isinstance(ad, dict):
+            return None
+
+        # Build mesh-node name lookup from master + slaves
+        node_names: dict[str, str] = {}
+        master = data.get("master")
+        if master and isinstance(master, dict):
+            node_names[master.get("instID", "")] = master.get(
+                "DeviceName", "Controller"
+            )
+        for slave in data.get("slave") or []:
+            if isinstance(slave, dict):
+                inst = slave.get("instID", "")
+                node_names[inst] = slave.get("DeviceName", inst)
+
+        access_type_map = {"0": "LAN", "1": "WLAN", "2": "WLAN"}
+
+        devices: list[dict[str, Any]] = []
+        for key, entry in ad.items():
+            if not isinstance(entry, dict):
+                continue  # skip MGET_INST_NUM and other non-device entries
+
+            mac = entry.get("MacAddr", "")
+            if not mac:
+                continue
+
+            parent_id = entry.get("parent", "")
+            access = str(entry.get("AccessType", ""))
+
+            devices.append(
+                {
+                    "MACAddress": mac.upper(),
+                    "HostName": entry.get("HostName", ""),
+                    "IPAddress": entry.get("IpAddr", ""),
+                    "Active": True,
+                    "IconType": "",
+                    "NetworkType": access_type_map.get(access, "Unknown"),
+                    "_AccessType": access,
+                    "Port": "",
+                    "LinkTime": "",
+                    "ConnectTime": "",
+                    "MeshNode": node_names.get(parent_id, parent_id),
+                }
+            )
+
+        return devices if devices else None
+
     def get_router_details(self) -> dict[str, Any] | None:
         """Get router details."""
         if not getattr(self, "query_router_details", True):
@@ -421,12 +609,12 @@ class zteClient:
                 raise RuntimeError("Session not initialized")
 
             # call first: https://10.0.0.1/?_type=menuView&_tag=statusMgr&Menu3Location=0&_=1756620757061
-            url = f"https://{self.host}/?_type=menuView&_tag=statusMgr&Menu3Location=0&_={self.get_guid()}"
+            url = f"{self.base_url}/?_type=menuView&_tag=statusMgr&Menu3Location=0&_={self.get_guid()}"
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
             self.log_request(r)
 
-            url = f"https://{self.host}/?_type=menuData&_tag=devmgr_statusmgr_lua.lua&_={self.get_guid()}"
+            url = f"{self.base_url}/?_type=menuData&_tag=devmgr_statusmgr_lua.lua&_={self.get_guid()}"
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
             self.log_request(r)
@@ -486,11 +674,11 @@ class zteClient:
         wan_attrs = {}
         try:
             # # Fetch MenuView first.
-            url = f"https://{self.host}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
+            url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
             # Fetch MenuData.
-            url = f"https://{self.host}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
+            url = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
             self.log_request(r)
@@ -676,7 +864,7 @@ class zteClient:
                 return False
 
             # First load menuView url https://10.0.0.1/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_=1756621946066
-            menu_view_url = f"https://{self.host}/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_={self.get_guid()}"
+            menu_view_url = f"{self.base_url}/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_={self.get_guid()}"
             r = self.session.get(menu_view_url, verify=self.verify_ssl, timeout=30)
             self.log_request(r)
             r.raise_for_status()
@@ -732,7 +920,7 @@ class zteClient:
                 "Content-Type": "application/x-www-form-urlencoded",
             }
 
-            url = f"https://{self.host}/?_type=menuData&_tag=devmgr_restartmgr_lua.lua&_={self.get_guid()}"
+            url = f"{self.base_url}/?_type=menuData&_tag=devmgr_restartmgr_lua.lua&_={self.get_guid()}"
             r = self.session.post(
                 url, data=post_data, headers=headers, verify=self.verify_ssl, timeout=30
             )

@@ -22,9 +22,10 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 ### Device Tracking
 
 - **Real-time device monitoring** for both WiFi and LAN connections
+- **Mesh network support** — see all devices across controller and mesh agent nodes
 - **Intelligent device persistence** - devices remain tracked even during temporary disconnections
 - **Smart device naming** with fallback to cached names for better identification
-- **Network type detection** (WiFi/LAN) with appropriate icons
+- **Network type detection** (WiFi/LAN) with SSID attribution and mesh node info
 
 ### Router Management
 
@@ -76,7 +77,7 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 
 - **Individual Device Trackers** (`device_tracker.zte_[mac_address]`)
   - State: `home` or `not_home`
-  - Attributes: IP address, hostname, network type (WLAN/LAN), device icon, last seen time, port (SSID name or LAN port), link duration, connect time.
+  - Attributes: IP address, hostname, network type (WLAN/LAN), device icon, last seen time, port (SSID name or LAN port), link duration, connect time, mesh node.
 
 ## 🎯 Services
 
@@ -119,6 +120,30 @@ To control whether newly discovered devices are added as `device_tracker` entiti
 
 - Entity: `switch.zte_register_new_devices`
 - State: `on` (new devices will be registered), `off` (only existing tracked devices are updated)
+
+## 🌐 Mesh Topology Support
+
+For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topology** in the integration options to see all devices across all mesh nodes — not just those connected directly to the controller.
+
+### How it works
+
+- Queries the router's topology endpoint (`topo_lua.lua`) to get the full mesh device list
+- Enriches topology data with SSID names from legacy WiFi endpoints
+- Agent WiFi devices inherit the SSID from controller devices with matching frequency band (2.4G → IoT SSID, 5G → Main SSID)
+- Exposes `mesh_node` attribute on each device tracker entity showing which mesh node it connects through
+- Falls back to legacy LAN+WiFi endpoints if topology is unavailable
+- Circuit breaker disables topology after 3 consecutive failures (auto-resets after 5 min)
+
+### Enable
+
+1. **Settings** → **Devices & Services** → **ZTE Router** → **Configure**
+2. Check **Mesh topology**
+3. Click **Submit**
+
+### Requirements
+
+- ZTE mesh setup (controller + one or more mesh agents)
+- Only verified on F6640/F6600P family; other models may not have the topology endpoint
 
 ## 🔧 Compatible Routers
 
