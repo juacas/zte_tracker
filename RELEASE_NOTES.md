@@ -1,43 +1,5 @@
 # Release Notes
-## v2.0.16
-### Added
-Eliminate the ~120 login/logout pairs per hour (and occasional Client token is not equal to server token daemon errors) that the current login_need_refresh short-circuit causes on this hardware. Behaviour: defaults to off, so existing installs are unchanged.
-Anyone can enable it by checking "Reuse session across polls" in the integration options. The robust fallback (stale-session retry-once + proactive refresh after SESSION_MAX_AGE) is unchanged, so users on other models can safely experiment. Thanks to @lebdim for the contribution! [#57](https://github.com/juacas/zte_tracker/issues/57)
-
-## v2.0.14
-### Added
-- Support for ZTE F680 router model.
-- Fix instance creation with wan status and router details queries enabled. Thanks to @GrzegorzWalewski and @risalt for reporting! [#55](https://github.com/juacas/zte_tracker/issues/55)
-
-## v2.0.13
-### Added
-- Option to enable/disable Wan and router details scans. Avoid extra load and warnings on unsupported models. [#52](https://github.com/juacas/zte_tracker/issues/52) reported by @Ices-Eyes (help needed for proper support for H2640 and H6645P V2).
-### Fixed
-- "Add new devices" switch not using known devices not in cache.
-- Ensure logout from de router when pausing scanning.
-- Fix device removal service to also remove orphaned devices without entities.
-
-## v2.0.12
-### Added
-- Reboot button for easy router reboot from Home Assistant UI.
-- Reboot action working for F6640 and similar models.
-
-## v2.0.11
-- Support for F6600P router model. [#53](https://github.com/juacas/zte_tracker/issues/53) thanks @lebdim
-- Added 4096 bit private key for F6600P.
-- Fix reboot action. Tested on F6600P. Not working for F6640. Testing help needed. [#53](https://github.com/juacas/zte_tracker/issues/52)
-
-## v2.0.9
-### Fixed
-- Parse integer values for router details and WAN attributes where applicable to ensure correct data types.
-- Tracked Devices correctly linked to tracker device. Devices shown in "Connected Devices" section.
-
-## v2.0.8
-### Fixed
-- Corrected WAN status data tag for ZTE H388X model. The previous tag caused issues in retrieving WAN status information. Thanks to @gradypark86 for reporting! [#44](https://github.com/juacas/zte_tracker/issues/44)
-
-## v2.0.7
-
+## v2.0.19
 ### Added
 
-- Support for ZTE SR7410 (ZTE BE7200 Pro+) router model. Thanks to @gradypark86 for the contribution! [#42](https://github.com/juacas/zte_tracker/issues/42)
+- 🌐 Mesh Topology Support: For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topology** in the integration options to see all devices across all mesh nodes — not just those connected directly to the controller.

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.0.19
+### Added
+
+- 🌐 Mesh Topology Support: For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topology** in the integration options to see all devices across all mesh nodes — not just those connected directly to the controller.
+
 ## v2.0.18
 ### Fixed
 - Fix [#65](https://github.com/juacas/zte_tracker/issues/65) polling failed after unpausing with logout timeou. Thanks to @lebdim for the contribution!
