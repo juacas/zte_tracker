@@ -1,8 +1,8 @@
 import os
 from unittest import TestCase
 from unittest.mock import Mock, patch
-from ..legacy_device_tracker import zteDeviceScanner
-from ..zteclient.zte_client import zteClient
+from custom_components.zte_tracker.legacy_device_tracker import zteDeviceScanner
+from custom_components.zte_tracker.zteclient.zte_client import zteClient
 
 
 class TestzteDeviceScanner(TestCase):

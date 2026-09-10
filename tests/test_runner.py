@@ -3,15 +3,13 @@ import pytest
 import sys
 import os
 
-# Add the custom_components directory to the Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'custom_components'))
+# Add the repo root to the Python path so "custom_components...." imports resolve.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 if __name__ == "__main__":
-    # Run tests with verbose output
+    # Run tests with verbose output. All suites now live under tests/.
     pytest.main([
         "-v",
-        "--tb=short", 
-        "tests/",
-        "../custom_components/zte_tracker/tests/",
-        "../custom_components/zte_tracker/zteclient/tests/"
+        "--tb=short",
+        os.path.dirname(__file__),
     ])

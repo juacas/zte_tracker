@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
+import secrets
+import time
+from datetime import datetime
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+)
+from homeassistant.exceptions import HomeAssistantError, Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -28,6 +38,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import ZteDataCoordinator
+from .support_bundle import BUNDLE_DIRNAME, build_bundle
 from .zteclient.zte_client import zteClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,7 +82,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data_copy = dict(entry.data)
         options_copy = dict(entry.options) if entry.options is not None else {}
         migrated = False
-        for key in (CONF_QUERY_WAN_STATUS, CONF_QUERY_ROUTER_DETAILS, CONF_SESSION_REUSE):
+        for key in (
+            CONF_QUERY_WAN_STATUS,
+            CONF_QUERY_ROUTER_DETAILS,
+            CONF_SESSION_REUSE,
+        ):
             if key in data_copy and key not in options_copy:
                 options_copy[key] = data_copy.pop(key)
                 migrated = True
@@ -227,6 +242,18 @@ REMOVE_TRACKED_ENTITY_SCHEMA = vol.Schema(
 
 REMOVE_UNIDENTIFIED_SERVICE_SCHEMA = vol.Schema({})
 
+EXPORT_SUPPORT_BUNDLE_SCHEMA = vol.Schema(
+    {
+        # No default, and refused when false: the point is that the caller has
+        # to state that they understand what the file will contain, before a
+        # single request reaches the router.
+        vol.Required("acknowledge_sensitive_data"): vol.All(
+            cv.boolean, vol.Range(min=True)
+        ),
+        vol.Optional("host"): cv.string,
+    }
+)
+
 
 async def async_reboot_service(call: ServiceCall):
     """Reboot router(s) for the specified host, or all if not specified."""
@@ -338,6 +365,170 @@ async def async_remove_unidentified_entities_service(call: ServiceCall):
         _LOGGER.info("Removed %d unidentified device_tracker entities.", removed)
 
 
+BUNDLE_MAX_AGE_SECONDS = 24 * 60 * 60
+
+
+def _prune_old_bundles(hass: HomeAssistant) -> None:
+    """Drop bundles older than a day.
+
+    They accumulate in the configuration directory otherwise, and every one of
+    them is a copy of the household's network. Only files this integration
+    created are considered, by name, and symlinks are ignored.
+    """
+    directory = hass.config.path(BUNDLE_DIRNAME)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return
+    cutoff = time.time() - BUNDLE_MAX_AGE_SECONDS
+    for name in names:
+        if not name.startswith("export-") or not name.endswith(".json"):
+            continue
+        path = os.path.join(directory, name)
+        try:
+            if os.path.islink(path) or os.stat(path).st_mtime > cutoff:
+                continue
+            os.remove(path)
+        except OSError:  # noqa: PERF203 - one bad file must not stop the sweep
+            _LOGGER.debug("Support bundle: could not prune %s", name)
+
+
+def _write_bundle(path: str, bundle: dict) -> None:
+    """Write the bundle to disk. Blocking; call from the executor.
+
+    Written 0600 inside its own directory rather than at default umask in the
+    configuration root: on Supervised and HAOS installs that directory is
+    exported to the whole LAN by the Samba add-on, and this is the most
+    sensitive artifact the integration produces.
+    """
+    directory = os.path.dirname(path)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    # Never follow a link here. chmod and the write below would otherwise act
+    # on whatever it points at, and the docstring's own scenario, a config
+    # directory shared over Samba, is one where something else can create it.
+    if os.path.islink(directory):
+        raise HomeAssistantError(
+            f"{BUNDLE_DIRNAME} is a symbolic link. Remove it and try again."
+        )
+    # Both mode arguments above are ignored when the target already exists, and
+    # after the first export it always does. Set them explicitly.
+    os.chmod(directory, 0o700)
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600
+    )
+    os.fchmod(descriptor, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(bundle, handle, indent=2, ensure_ascii=False)
+
+
+async def async_export_support_bundle_service(call: ServiceCall) -> ServiceResponse:
+    """Probe every known endpoint profile and describe what came back.
+
+    This exists so a router model nobody owns can still be added: the reporter
+    runs one service call and attaches the result, instead of being talked
+    through browser devtools. Only structure is recorded (see support_shape),
+    because these files end up in public issues.
+    """
+    hass = call.hass
+
+    # Admin only. This is the same check async_register_admin_service performs,
+    # done inline because that helper only accepts supports_response from HA
+    # 2025.6: passing it on an older core raises TypeError inside
+    # async_setup_entry and takes the entire integration down, presence
+    # detection included. A service that needs a version floor to register is
+    # not worth breaking every older installation for.
+    # An empty user_id means an automation or script, which stays allowed.
+    if call.context.user_id:
+        user = await hass.auth.async_get_user(call.context.user_id)
+        if user is None or not user.is_admin:
+            raise Unauthorized(context=call.context)
+
+    if not call.data.get("acknowledge_sensitive_data"):
+        raise HomeAssistantError(
+            "Set acknowledge_sensitive_data to true. The bundle describes "
+            "your router's response structure, including the field and node "
+            "names its firmware uses: have a look before sharing it."
+        )
+
+    host = call.data.get("host")
+    _prune_old_bundles(hass)
+    results: dict[str, dict] = {}
+
+    # Snapshot the mapping: the walk below awaits for minutes and an entry
+    # unload pops from this same dict, which would raise RuntimeError mid-probe.
+    for entry_id, coordinator in list(hass.data[DOMAIN].items()):
+        if entry_id == "yaml_config":
+            continue
+        client = getattr(coordinator, "client", None)
+        if not client:
+            continue
+        if host and getattr(client, "host", None) != host:
+            continue
+
+        lock = getattr(coordinator, "_client_lock", None)
+        if lock is not None:
+            # Serialise against the coordinator's own poll: the client holds a
+            # single session and the router drops it if two walks interleave.
+            # The walk bounds itself with WALK_DEADLINE; an asyncio timeout here
+            # would only release the lock while the worker thread kept going.
+            async with lock:
+                bundle = await hass.async_add_executor_job(build_bundle, client)
+        else:
+            bundle = await hass.async_add_executor_job(build_bundle, client)
+
+        if bundle.get("error") and not bundle.get("preauth"):
+            # A failed login is the one case the pre-auth probes exist for, so
+            # the file is written whenever they captured anything: it is the
+            # only evidence a broken login can be reported with.
+            results[client.host] = {"error": bundle["error"]}
+            continue
+
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        # The filename must not carry the host: users attach the file by name
+        # and a DDNS hostname would be disclosed before anyone opens it. A short
+        # digest still separates two routers and still sorts.
+        # Random, not derived from the host: the set of plausible router hosts
+        # is small enough that a digest of one is a dictionary away from the
+        # value it was meant to hide.
+        export_id = secrets.token_hex(3)
+        filename = os.path.join(BUNDLE_DIRNAME, f"export-{export_id}-{stamp}.json")
+        path = hass.config.path(filename)
+        await hass.async_add_executor_job(_write_bundle, path, bundle)
+
+        probes = bundle.get("probes", {})
+        results[client.host] = {
+            "file": filename,
+            "path": path,
+            "reported": bundle.get("reported", {}),
+            "probes_total": len(probes),
+            "probes_ok": len([p for p in probes.values() if p.get("status") == 200]),
+            "error": bundle.get("error"),
+            # A slow router can burn the whole deadline before the walk starts,
+            # which produced an empty file and reported no error at all.
+            "truncated": bool(
+                bundle.get("walk_truncated") or bundle.get("preauth_truncated")
+            ),
+        }
+        _LOGGER.info("Support bundle written to %s", path)
+
+    if results:
+        return {
+            "bundles": results,
+            "note": (
+                "No hostname, SSID, serial number, MAC address or IP address "
+                "is collected. Field and node names are printed as your "
+                "firmware supplies them, so open the file and have a look "
+                "before attaching it to a public issue."
+            ),
+        }
+
+    if not results:
+        raise HomeAssistantError(
+            "No ZTE router found to export a support bundle from"
+            + (f" (host={host})" if host else "")
+        )
+
+
 def setup_services(hass):
     hass.services.async_register(
         DOMAIN,
@@ -356,4 +547,11 @@ def setup_services(hass):
         "remove_unidentified_entities",
         async_remove_unidentified_entities_service,
         schema=REMOVE_UNIDENTIFIED_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "export_support_bundle",
+        async_export_support_bundle_service,
+        schema=EXPORT_SUPPORT_BUNDLE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
     )

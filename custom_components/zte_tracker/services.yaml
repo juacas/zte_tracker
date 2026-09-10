@@ -24,3 +24,19 @@ remove_tracked_entity:
 remove_unidentified_entities:
   name: Remove Unidentified Device Entities
   description: Removes all device entities with no unique ID.
+export_support_bundle:
+  name: Export Router Support Bundle
+  description: Writes a JSON file into the zte_tracker_support folder describing the structure of your router's responses, for attaching to a "please support my model" issue. No hostname, SSID, serial, MAC or IP address is collected.
+  fields:
+    acknowledge_sensitive_data:
+      name: I will read the file before sharing it
+      description: Node and field names come from your firmware, so have a look before attaching it. Nothing is exported unless this is true.
+      required: true
+      selector:
+        boolean:
+    host:
+      name: Host
+      description: Only export for this router. Omit to export for all configured routers.
+      required: false
+      selector:
+        text: {}

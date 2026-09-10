@@ -17,6 +17,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, ICONS
 from .coordinator import ZteDataCoordinator
 
+# HA deprecated the via_device parameter in favour of via_device_id, and says
+# so at runtime; it stops working in 2027.8. via_device_id does not exist on
+# the older cores this integration still supports, so pick at import time
+# rather than hardcoding either one.
+_SUPPORTS_VIA_DEVICE_ID = "via_device_id" in getattr(DeviceInfo, "__annotations__", {})
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -35,12 +41,21 @@ async def async_setup_entry(
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
     router_info = (coordinator.data or {}).get("router_info", {}) or {}
+    client = getattr(coordinator, "client", None)
+    # ModelName, HardwareVer and SoftwareVer come from the OBJ_DEVINFO_ID node
+    # the client now reads. Before this, the device card showed the configured
+    # profile name in the firmware field, so a user checking their firmware
+    # version was told "F6600P".
     router_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.entry_id)},
         name=entry.title or router_info.get("name", "ZTE Router"),
-        manufacturer=router_info.get("manufacturer", "ZTE"),
-        model=router_info.get("model"),
+        manufacturer=router_info.get("ManuFacturer")
+        or router_info.get("manufacturer", "ZTE"),
+        model=router_info.get("ModelName") or router_info.get("model"),
+        sw_version=router_info.get("SoftwareVer"),
+        hw_version=router_info.get("HardwareVer"),
+        configuration_url=getattr(client, "base_url", None),
     )
     area_id = router_device.area_id
 
@@ -93,7 +108,7 @@ async def async_setup_entry(
                         # Skip creating new entity when not allowed and no existing registry entry
                         continue
                     entity = ZteDeviceTrackerEntity(
-                        coordinator, entry, mac, device_data
+                        coordinator, entry, mac, device_data, router_device.id
                     )
                     entities.append(entity)
                     created_entities.add(mac)
@@ -146,7 +161,9 @@ async def async_setup_entry(
                 if getattr(reg_entity, "original_name", None):
                     device_data["name"] = reg_entity.original_name
 
-            entity = ZteDeviceTrackerEntity(coordinator, entry, reg_mac, dict(device_data))
+            entity = ZteDeviceTrackerEntity(
+                coordinator, entry, reg_mac, dict(device_data), router_device.id
+            )
             entities.append(entity)
             queued_macs.add(reg_mac)
             created_entities.add(reg_mac)
@@ -204,12 +221,14 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
         entry: ConfigEntry,
         mac: str,
         device_data: dict[str, Any],
+        router_device_id: str | None = None,
     ) -> None:
         """Initialize the device tracker."""
         super().__init__(coordinator)
         self._entry = entry
         self._mac = mac
         self._device_data = device_data
+        self._router_device_id = router_device_id
         self._attr_name = device_data.get("name") or f"Device {mac}"
 
         # NOTE: we intentionally do NOT set self._attr_unique_id here. HA's
@@ -235,8 +254,14 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
             connections={("mac", self._mac)},
             name=self._device_data.get("name") or self._mac,
             manufacturer="ZTE",
-            via_device=(DOMAIN, self._entry.entry_id),
+            **self._via_router(),
         )
+
+    def _via_router(self) -> dict[str, Any]:
+        """Link this device to the router, on whichever key HA accepts."""
+        if _SUPPORTS_VIA_DEVICE_ID and self._router_device_id:
+            return {"via_device_id": self._router_device_id}
+        return {"via_device": (DOMAIN, self._entry.entry_id)}
 
     @property
     def source_type(self) -> SourceType:
