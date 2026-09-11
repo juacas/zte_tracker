@@ -1,6 +1,6 @@
 import unittest
 import os
-from zte_client import zteClient
+from custom_components.zte_tracker.zteclient.zte_client import zteClient
 #import ...
 
 #class zteClientTest(unittest.TestCase):

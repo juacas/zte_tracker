@@ -1,0 +1,31 @@
+name: Bug report
+description: Something misbehaves on a router that is already supported
+labels: ["bug"]
+body:
+  - type: input
+    id: versions
+    attributes:
+      label: Router model, firmware, Home Assistant and integration versions
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens, and what you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Enable debug logging for `custom_components.zte_tracker`.
+      render: text
+
+  - type: checkboxes
+    id: diagnostics
+    attributes:
+      label: Diagnostics, from the device page
+      options:
+        - label: Attached

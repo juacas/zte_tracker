@@ -1,0 +1,37 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: "actions/checkout@v5"
+      - uses: "actions/setup-python@v6"
+        with:
+          python-version: "3.12"
+
+      # cryptography: imported by zte_client, shipped by HA, declared nowhere.
+      - run: pip install -r requirements.txt cryptography flake8==7.1.1 black==24.10.0
+
+      # These load their targets with importlib, so they need no Home Assistant.
+      - working-directory: tests
+        run: python -m unittest test_support_bundle test_service_layer test_diagnostics
+
+      - working-directory: tests/zteclient
+        run: python -m unittest test_router_details_parsing
+
+      # The property: no value from a router appears in its own description.
+      - working-directory: tests
+        env:
+          ZTE_FUZZ_ITERATIONS: 50000
+        run: python -m unittest test_support_shape_fuzz
+
+      - run: |
+          MODULES="custom_components/zte_tracker/support_shape.py custom_components/zte_tracker/support_bundle.py custom_components/zte_tracker/diagnostics.py"
+          flake8 $MODULES
+          black --check $MODULES

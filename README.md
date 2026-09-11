@@ -112,6 +112,29 @@ data:
   mac: E4:BC:AA:0D:B8:F6
 ```
 
+### `zte_tracker.export_support_bundle`
+
+Writes a JSON file into `zte_tracker_support/` describing the **structure** of your router's responses, for attaching to a "please support my model" issue. A failed login still produces one. Owner readable only, pruned after 24 hours.
+
+```yaml
+action: zte_tracker.export_support_bundle
+data:
+  acknowledge_sensitive_data: true   # required
+  host: 192.168.1.1                  # optional, one router instead of all
+```
+
+| Summary field | Meaning |
+|---------------|---------|
+| `best_matching_profile` | The profile your router answered. Usually supportable as an alias of it |
+| `tied_profiles` | Profiles sharing every endpoint, so probing cannot separate them |
+| `nodes_not_understood` | Data your firmware returns that no parser reads yet |
+| `endpoints_answered_empty` | Endpoints that exist and returned no devices |
+
+> [!NOTE]
+> No hostname, SSID, serial, MAC or IP address is collected: only node and field names, record counts, and the shape of each value. Names come from your firmware, so have a look before attaching it.
+
+Diagnostics, from the device page, is the other artifact: shapes and counts for when a **supported** router misbehaves.
+
 ## 🕹️ Pause/Resume Tracker
 
 To pause or resume the tracker, use the ZTE Tracker Pause switch in the Home Assistant UI. This is useful when you need to access the router's web interface without interference.
@@ -170,6 +193,8 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 | ZTE SR7410 (ZTE BE7200 Pro+)   |      SR7410      |    ✅    |
 
 > **Note**: This integration may work with additional ZTE router models. Try one of the above parameter values to test compatibility.
+
+> **Not listed?** Try each value above first, then run [`zte_tracker.export_support_bundle`](#zte_trackerexport_support_bundle) and attach the file to an issue.
 
 > **F8748 note**: Verified on a unit provided by **DIGI Portugal** (firmware `V3.0.10P2N4`, hardware `V3.0.03`). It shares the F6640 web-console endpoints, and is defined as a distinct model because this firmware additionally exposes **WAN traffic counters** in `wan_internetstatus_lua.lua`. When the model is `F8748`, the integration parses those into extra router-status attributes: `WAN_rx_bytes`, `WAN_tx_bytes`, `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors`. This is gated to `F8748` so other F6640-family routers are unaffected (we could not confirm they populate the same fields). DIGI units in other countries (e.g. Spain, Romania) are likely identical; F8748 units from other providers or bought retail may expose additional pages/data we could not confirm.
 

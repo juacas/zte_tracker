@@ -1,0 +1,40 @@
+name: Router model support request
+description: Ask for a ZTE model that is not yet supported
+title: "[Model] "
+labels: ["model support"]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Router model and firmware version
+      placeholder: ZTE H6745 V3, firmware V6.0.10P3N2
+    validations:
+      required: true
+
+  - type: input
+    id: isp
+    attributes:
+      label: ISP and country
+      description: Providers ship different firmware on the same hardware.
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: Which model values from the README table did you try, and what happened?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: bundle
+    attributes:
+      label: Support bundle
+      description: If the integration is installed, run the `zte_tracker.export_support_bundle` action and attach the file from `config/zte_tracker_support/`. Nobody here owns your router, so it is the fastest route to support.
+      options:
+        - label: Attached, and I opened it first
+
+  - type: input
+    id: setup_error
+    attributes:
+      label: If you could not install it, what did Home Assistant say?
+      description: Adding the integration fails if no known endpoint returns devices, so an unsupported model often cannot get far enough to run the export.
+      placeholder: Connected but could not retrieve device data.

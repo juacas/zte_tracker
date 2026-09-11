@@ -139,6 +139,11 @@ black custom_components/zte_tracker/
 │   ├── device_tracker.py               # Device tracking implementation
 │   ├── sensor.py                       # Status sensors
 │   ├── const.py                        # Constants and configuration
+│   ├── coordinator.py                  # Polling, session and device cache
+│   ├── config_flow.py                  # UI setup and options
+│   ├── diagnostics.py                  # Diagnostics platform
+│   ├── support_bundle.py               # Endpoint walk for the export service
+│   ├── support_shape.py                # Structure description, no values
 │   ├── manifest.json                   # Integration metadata
 │   ├── services.yaml                   # Service definitions
 │   ├── strings.json                    # UI strings
@@ -154,7 +159,7 @@ black custom_components/zte_tracker/
 
 ### Supported Router Models
 
-F6640, H288A, H169A, H388X, H2640, F6645P, H3600P, H6645P, H3640
+See the table in README.md, which is the list that is kept current.
 
 ### Key Configuration
 
@@ -167,7 +172,8 @@ F6640, H288A, H169A, H388X, H2640, F6645P, H3600P, H6645P, H3640
 
 - **hassfest validation**: Validates Home Assistant integration standards
 - **HACS validation**: Validates HACS integration requirements
-- Both run on push and pull requests - NEVER CANCEL, wait for completion
+- **Tests**: unit tests, client parsing tests, the structure description property fuzz, and flake8 and black on the support modules
+- All run on push and pull requests - NEVER CANCEL, wait for completion
 
 ### Expected Command Times
 
@@ -209,7 +215,16 @@ If the devcontainer fails to start:
 
 ### Test Issues
 
-The repository includes unit tests with import path dependencies. Use the validation commands above instead of trying to run tests directly with unittest or pytest.
+The suites under `custom_components/zte_tracker/tests/` and `zteclient/tests/` load their targets with importlib, so they run without Home Assistant installed:
+
+```bash
+cd custom_components/zte_tracker/tests
+python3 -m unittest test_support_bundle test_service_layer test_diagnostics
+python3 -m unittest test_support_shape_fuzz   # ZTE_FUZZ_ITERATIONS to raise the count
+cd ../zteclient/tests && python3 -m unittest test_router_details_parsing
+```
+
+The older suites in the same folders still import Home Assistant and pytest, and cannot be run that way. The Tests workflow runs the standalone ones on every push.
 
 ## Router data formats
 

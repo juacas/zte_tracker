@@ -147,6 +147,24 @@ class zteClient:
         """Return the list of supported model keys."""
         return list(_MODELS.keys())
 
+    @staticmethod
+    def get_profiles() -> dict[str, dict[str, Any]]:
+        """Return the distinct endpoint profiles behind the model list.
+
+        Most model names are aliases of the same handful of profiles, and
+        several share the same dict object. Deduplicate by identity so a caller
+        that wants to walk every endpoint the client knows about, such as the
+        support bundle, does each one once and gets a stable name for it.
+        """
+        profiles: dict[str, dict[str, Any]] = {}
+        seen: set[int] = set()
+        for name, paths in _MODELS.items():
+            if id(paths) in seen:
+                continue
+            seen.add(id(paths))
+            profiles[name] = paths
+        return profiles
+
     def _setup_session(self) -> None:
         """Set up HTTP session with retry strategy and security settings."""
         self.session = Session()
@@ -483,6 +501,7 @@ class zteClient:
         failures = getattr(self, "_topo_failures", 0)
         if failures >= 3:
             import time as _time
+
             last_fail = getattr(self, "_topo_last_fail", 0)
             if _time.time() - last_fail < 300:
                 return None
@@ -522,7 +541,8 @@ class zteClient:
             text = r.text
             if "SessionTimeout" in text or "<html" in text[:500].lower():
                 _LOGGER.debug("Topology inline: error response (len=%d)", len(text))
-                self._topo_failures = failures + 1; self._topo_last_fail = time.time()
+                self._topo_failures = failures + 1
+                self._topo_last_fail = time.time()
                 return None
 
             data = json.loads(text)
@@ -534,16 +554,19 @@ class zteClient:
                 return devices
 
             _LOGGER.debug("Topology inline: valid JSON but no devices")
-            self._topo_failures = failures + 1; self._topo_last_fail = time.time()
+            self._topo_failures = failures + 1
+            self._topo_last_fail = time.time()
             return None
 
         except json.JSONDecodeError:
             _LOGGER.debug("Topology inline: non-JSON response")
-            self._topo_failures = failures + 1; self._topo_last_fail = time.time()
+            self._topo_failures = failures + 1
+            self._topo_last_fail = time.time()
             return None
         except Exception as ex:
             _LOGGER.debug("Topology inline failed: %s", ex)
-            self._topo_failures = failures + 1; self._topo_last_fail = time.time()
+            self._topo_failures = failures + 1
+            self._topo_last_fail = time.time()
             return None
 
     def _parse_topology_json(self, data: dict) -> list[dict[str, Any]] | None:
@@ -637,45 +660,70 @@ class zteClient:
             xml = ET.fromstring(r.text)
 
             # node OBJ_CPUMEMUSAGE_ID has CpuUsage1 to CpuUsage4, MemUsage.
-            cpu_node = xml.find("OBJ_CPUMEMUSAGE_ID/Instance")
-            if cpu_node:
-                # ElementTree elements do not provide getnext(), so iterate children in pairs:
-                children = list(cpu_node)
-                for i in range(0, len(children), 2):
-                    name_elem = children[i]
-                    value_elem = children[i + 1] if i + 1 < len(children) else None
-                    pname = name_elem.text if name_elem is not None else None
-                    pvalue = value_elem.text if value_elem is not None else None
-                    if pname and pvalue and pname != "_InstID":
-                        router_details[pname] = (
-                            int(pvalue)
-                            if pvalue is not None and pvalue.isdigit()
-                            else pvalue
-                        )
+            router_details.update(
+                self._parse_instance(xml.find("OBJ_CPUMEMUSAGE_ID/Instance"))
+            )
             # node OBJ_POWERONTIME_ID has PowerOnTime.
-            power_node = xml.find("OBJ_POWERONTIME_ID/Instance")
-            if power_node:
-                # ElementTree elements do not provide getnext(), so iterate children in pairs:
-                children = list(power_node)
-                for i in range(0, len(children), 2):
-                    name_elem = children[i]
-                    value_elem = children[i + 1] if i + 1 < len(children) else None
-                    pname = name_elem.text if name_elem is not None else None
-                    pvalue = value_elem.text if value_elem is not None else None
-                    if pname and pvalue and pname != "_InstID":
-                        if pname == "PowerOnTime":
-                            router_details[pname] = (
-                                int(pvalue)
-                                if pvalue is not None and pvalue.isdigit()
-                                else pvalue
-                            )
-                        else:
-                            router_details[pname] = pvalue
+            # coerce_numeric is False here to preserve the original behaviour
+            # exactly: the old loop int-coerced PowerOnTime alone and left every
+            # sibling in this node as a string. Changing that would silently
+            # alter the type of an existing sensor attribute.
+            power = self._parse_instance(
+                xml.find("OBJ_POWERONTIME_ID/Instance"), coerce_numeric=False
+            )
+            if (
+                isinstance(power.get("PowerOnTime"), str)
+                and power["PowerOnTime"].isdigit()
+            ):
+                power["PowerOnTime"] = int(power["PowerOnTime"])
+            router_details.update(power)
+            # node OBJ_DEVINFO_ID identifies the hardware itself: ModelName,
+            # HardwareVer, SoftwareVer. This endpoint is model independent (the
+            # tag is hardcoded above, not read from self.paths), so it is the
+            # one place that can answer "which router is this?" without the
+            # caller already knowing. SerialNumber is deliberately dropped: it
+            # identifies the unit, it is of no use to the integration, and users
+            # paste these attributes into public issues.
+            devinfo = self._parse_instance(xml.find("OBJ_DEVINFO_ID/Instance"))
+            for field in ("ModelName", "HardwareVer", "SoftwareVer", "ManuFacturer"):
+                if devinfo.get(field):
+                    router_details[field] = devinfo[field]
             return router_details
 
         except Exception as e:
             _LOGGER.error("Error fetching router details: %s", e)
             return None
+
+    @staticmethod
+    def _parse_instance(node: Any, coerce_numeric: bool = True) -> dict[str, Any]:
+        """Flatten a ZTE <Instance> node into a dict.
+
+        The firmware emits ParaName/ParaValue as sibling pairs rather than
+        nesting the value inside the name, and ElementTree has no getnext(),
+        so the children are walked two at a time. Numeric strings are coerced
+        to int when `coerce_numeric` is set; _InstID is dropped as an internal
+        identifier.
+
+        Note the `is not None` test. The previous `if node:` form produced the
+        same result for an empty node, so this is not a behaviour fix, but
+        Python already warns that truth-testing an Element will become an
+        error, and the intent is clearer.
+        """
+        parsed: dict[str, Any] = {}
+        if node is None:
+            return parsed
+        children = list(node)
+        for i in range(0, len(children), 2):
+            name_elem = children[i]
+            value_elem = children[i + 1] if i + 1 < len(children) else None
+            pname = name_elem.text if name_elem is not None else None
+            pvalue = value_elem.text if value_elem is not None else None
+            if pname and pvalue and pname != "_InstID":
+                if coerce_numeric and pvalue.isdigit():
+                    parsed[pname] = int(pvalue)
+                else:
+                    parsed[pname] = pvalue
+        return parsed
 
     def get_wan_status(self) -> dict[str, Any]:
         """Fetch WAN status and return relevant attributes."""

@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout repository (fetch tags)
-        uses: actions/checkout@v3
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -49,9 +49,12 @@ jobs:
 
       - name: Create ZIP asset
         run: |
+          set -euo pipefail
           mkdir -p dist
-          zip -r "dist/${ASSET_NAME}" custom_components/zte_tracker README.md hacs.json || true
-          ls -lh dist || true
+          # Ship only what Home Assistant imports.
+          zip -r "dist/${ASSET_NAME}" custom_components/zte_tracker README.md hacs.json \
+            -x "*/tests/*" "*/routers/*" "*/.vscode/*" "*/__pycache__/*" "*.pyc"
+          ls -lh dist
 
       - name: Debug dist contents
         run: |
@@ -85,24 +88,37 @@ jobs:
             RELEASE_BODY=$(printf "Changes in this release:\n\n%s" "$BODY")
           fi
 
-          # Prepend CHANGELOG content only if the file changed since the previous release tag.
-          if [ -n "$PREV_TAG" ] && ! git diff --quiet "${PREV_TAG}..${TAG}" -- CHANGELOG.md; then
-            CHANGELOG_CONTENT=$(cat CHANGELOG.md)
-            if [ -n "$CHANGELOG_CONTENT" ]; then
-              RELEASE_BODY=$(printf "CHANGELOG.md\n\n%s\n\n---\n\n%s" "$CHANGELOG_CONTENT" "$RELEASE_BODY")
-            fi
+          # This version's section only: the whole file used to be pasted in.
+          CHANGELOG_CONTENT=$(awk -v tag="${TAG}" '
+            function norm(s) { sub(/ +-.*$/, "", s); gsub(/[][]/, "", s); sub(/^v/, "", s); return s }
+            /^## / {
+              if (found) exit
+              hdr = $0; sub(/^## +/, "", hdr)
+              found = (norm(hdr) == norm(tag))
+              next
+            }
+            found { print }
+          ' CHANGELOG.md 2>/dev/null || true)
+          if [ -n "$CHANGELOG_CONTENT" ]; then
+            RELEASE_BODY=$(printf "%s\n\n---\n\n%s" "$CHANGELOG_CONTENT" "$RELEASE_BODY")
           fi
 
-          echo "body<<EOF" >> $GITHUB_OUTPUT
+          # A tag message line reading "EOF" would close the block early.
+          DELIM="EOF_$(openssl rand -hex 8)"
+          echo "body<<${DELIM}" >> $GITHUB_OUTPUT
           printf "%s\n" "$RELEASE_BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "${DELIM}" >> $GITHUB_OUTPUT
+
+          printf "%s\n" "$RELEASE_BODY" > dist/release-notes.md
 
       - name: Debug changelog output
+        # Commit subjects are untrusted: interpolated into run, they execute.
+        env:
+          BODY: ${{ steps.changelog.outputs.body }}
         run: |
           echo "=== CHANGELOG OUTPUT ==="
-          echo "Steps.changelog.outputs.body (raw):"
           echo "----------------------------"
-          echo "${{ steps.changelog.outputs.body }}"
+          printf '%s\n' "$BODY"
           echo "----------------------------"
         shell: bash
 
@@ -119,40 +135,44 @@ jobs:
           fi
         shell: bash
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Replaces actions/create-release + upload-release-asset, both archived.
+      - name: Create release and upload the asset
+        # The repair step below is the authority, and covers transient failures.
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
-          release_name: "ZTE_TRACKER_${{ env.TAG_NAME }}"
-          body: ${{ steps.changelog.outputs.body }}
+          name: "ZTE_TRACKER_${{ env.TAG_NAME }}"
+          body_path: dist/release-notes.md
           draft: false
           prerelease: false
-
-      - name: Debug create_release outputs
-        run: |
-          echo "=== create_release outputs ==="
-          echo "upload_url: ${{ steps.create_release.outputs.upload_url }}"
-          echo "release_id: ${{ steps.create_release.outputs.id || 'n/a' }}"
-        shell: bash
-
-      - name: Upload Release Asset
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1
+          files: dist/${{ env.ASSET_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist/${{ env.ASSET_NAME }}
-          asset_name: ${{ env.ASSET_NAME }}
-          asset_content_type: application/zip
 
-      - name: Debug upload-release-asset result
+      - name: Verify the asset reached GitHub, and repair it if not
+        # Success above only means the API answered. The old check was "ls dist".
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "=== Upload result debug ==="
-          echo "Asset attempted: dist/${ASSET_NAME}"
-          echo "Release upload_url used: ${{ steps.create_release.outputs.upload_url }}"
-          ls -la dist || true
+          set -uo pipefail
+          EXPECTED=$(stat -c%s "dist/${ASSET_NAME}")
+          asset_size() {
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG_NAME}" \
+              --jq ".assets[] | select(.name==\"${ASSET_NAME}\") | .size" 2>/dev/null || true
+          }
+          for attempt in 1 2 3 4 5; do
+            gh release view "${TAG_NAME}" >/dev/null 2>&1 || gh release create "${TAG_NAME}" \
+              --title "ZTE_TRACKER_${TAG_NAME}" --notes-file dist/release-notes.md || true
+            SIZE=$(asset_size)
+            [ "${SIZE:-0}" = "${EXPECTED}" ] && { echo "Asset complete, attempt ${attempt}."; exit 0; }
+            echo "Attempt ${attempt}: asset ${SIZE:-absent}, re-uploading."
+            gh release upload "${TAG_NAME}" "dist/${ASSET_NAME}" --clobber || true
+            sleep $((attempt * 5))
+          done
+          # The last upload of the loop is never seen by the checks above.
+          SIZE=$(asset_size)
+          [ "${SIZE:-0}" = "${EXPECTED}" ] && { echo "Asset complete after the final upload."; exit 0; }
+          echo "Asset never landed. Refusing to ship an empty release."
+          exit 1
         shell: bash

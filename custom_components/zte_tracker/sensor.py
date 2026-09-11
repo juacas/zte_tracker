@@ -39,11 +39,18 @@ class ZteBaseSensor(CoordinatorEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._entry = entry
+        router_info = (coordinator.data or {}).get("router_info", {}) or {}
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=f"ZTE Router {coordinator.client.host}",
-            manufacturer="ZTE",
-            model=coordinator.client.model,
+            manufacturer=router_info.get("ManuFacturer", "ZTE"),
+            model=router_info.get("ModelName") or coordinator.client.model,
+            sw_version=router_info.get("SoftwareVer"),
+            hw_version=router_info.get("HardwareVer"),
+            # The scheme is per profile and the user can override it, so the
+            # link is taken from the client rather than assumed. It was
+            # hardcoded to https, which is a dead link on an http only unit.
+            configuration_url=getattr(coordinator.client, "base_url", None),
         )
 
 
