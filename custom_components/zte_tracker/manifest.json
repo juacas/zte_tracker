@@ -1,11 +1,11 @@
 {
   "domain": "zte_tracker",
   "name": "ZTE router tracker",
-  "codeowners": ["@juacas"],
+  "codeowners": ["@juacas","@lebdim"],
   "config_flow": true,
   "documentation": "https://github.com/juacas/zte_tracker",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/juacas/zte_tracker/issues",
   "requirements": [],
-  "version": "v2.0.20"
+  "version": "v2.1.0"
 }
