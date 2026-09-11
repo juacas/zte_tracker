@@ -12,12 +12,10 @@
 ![GitHub commits since tagged version](https://img.shields.io/github/commits-since/juacas/zte_tracker/v1.0.0)
 ![GitHub last commit](https://img.shields.io/github/last-commit/juacas/zte_tracker)
 ![installation_badge](https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=integration%20usage&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.zte_tracker.total)
-> [!WARNING]
-> **Looking for a new maintainer!**
+> [!NOTE]
+> **Project stewardship**
 >
-> Due to a recent change in my network infrastructure, I no longer use a ZTE router. Because I do not have the hardware to test changes, I can no longer actively maintain or develop this integration.
->
-> If you are a developer using this integration and would like to step in as a collaborator to keep it alive, please drop a comment in [Issue #76 - Looking for maintainer](https://github.com/juacas/zte_tracker/issues/76).
+> With huge generosity, [@lebdim](https://github.com/lebdim) has contributed substantially to this integration and is now in charge of the project. Please join me in thanking him and direct future maintenance and support contributions his way. The call remains open for additional maintainers and collaborators who would like to help keep the project growing.
 # ZTE Router Integration for Home Assistant
 
 A modern, feature-rich integration for ZTE routers that provides comprehensive device tracking and router management capabilities for Home Assistant.
@@ -378,6 +376,8 @@ pytest custom_components/zte_tracker/tests/
 ## 🙏 Acknowledgments
 
 - **@juacas** for original development and ongoing maintenance
+- **@lebdim** for major contributions and project stewardship from v2.1.0 upwards
+- **@Ices-Eyes** for fixing unconnected devices issue #72
 - **@gselivanof** for H288A, H169A models support
 - **@TrinTragula** for H388X verification
 - **@kvshino** for H2640 verification
@@ -386,7 +386,8 @@ pytest custom_components/zte_tracker/tests/
 - **@lapo** for H6645P verification
 - **@309631** for H3640 verification
 - **@LZDEROH** for AX3000 verification
-- **gradypark86** for SR7410 verification
+- **@gradypark86** for SR7410 verification
+
 
 ## 📄 License
 

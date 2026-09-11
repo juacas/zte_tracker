@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.1.0
+
+### Added
+
+- Home Assistant diagnostics for inspecting router, coordinator, integration, and device state while redacting credentials and identifying network data.
+- `zte_tracker.export_support_bundle` service to probe known router endpoints and export a privacy-conscious description of response shapes for supporting new or problematic router models.
+- Support-bundle safeguards, including explicit sharing acknowledgement, restricted file permissions, bounded probes, and automatic cleanup of old exports.
+- New issue templates and a dedicated automated test workflow for diagnostics, service behavior, support bundles, and response-shape privacy.
+
+### Changed
+
+- Router device and sensor metadata now use the model, manufacturer, hardware version, firmware version, and configuration URL reported by the router when available.
+- Device trackers use the modern Home Assistant router relationship API when supported, while retaining compatibility with older Home Assistant versions.
+- Release packaging and publishing workflows were modernized and hardened, including safer changelog extraction and verification that release assets are uploaded correctly.
+- Router client probing and response parsing were extended to identify endpoint behavior and describe JSON/XML structures without exporting router values.
+
 ## v2.0.20
 ### Added
 
