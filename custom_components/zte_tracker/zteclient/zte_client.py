@@ -55,6 +55,18 @@ _MODELS = {
         "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
         "default_scheme": "https",
     },
+    "H2640": {
+        "wlan_script": "accessdev_ssiddev_lua.lua",
+        "wlan_id_element": "OBJ_ACCESSDEV_ID",
+        "lan_script": "accessdev_landevs_lua.lua",
+        "lan_id_element": "OBJ_ACCESSDEV_ID",
+        "type_first_request": "menuView",
+        "type_main_request": "menuData",
+        "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
+        "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
+        "default_scheme": "https",
+        "reboot_check_encrypted": False,  # H2640: the router expects unencrypted SHA256 hex, not RSA
+    },    
     "H388X": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
         "wlan_id_element": "OBJ_ACCESSDEV_ID",
@@ -81,7 +93,6 @@ _MODELS = {
 
 # Add synonyms
 _MODELS["H169A"] = _MODELS["H288A"]
-_MODELS["H2640"] = _MODELS["H288A"]
 _MODELS["F6645P"] = _MODELS["F6640"]
 _MODELS["F6600P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
@@ -996,12 +1007,18 @@ class zteClient:
                     "-----END PUBLIC KEY-----"
                 )
 
-            public_key = serialization.load_pem_public_key(pub_key_pem.encode("utf-8"))
-            encrypted_digest = public_key.encrypt(
-                digest_str.encode("utf-8"), padding.PKCS1v15()
-            )
-            check_header = base64.b64encode(encrypted_digest).decode("utf-8")
-
+            if self.paths.get("reboot_check_encrypted", True):
+                public_key = serialization.load_pem_public_key(
+                    pub_key_pem.encode("utf-8")
+                )
+                encrypted_digest = public_key.encrypt(
+                    digest_str.encode("utf-8"), padding.PKCS1v15()
+                )
+                check_header = base64.b64encode(encrypted_digest).decode("utf-8")
+            else:
+                # H2640 and similar: the router directly verifies
+                # SHA256(post_data) in hexadecimal, without RSA encryption.
+                check_header = digest_str
             headers = {
                 "Check": check_header,
                 "Content-Type": "application/x-www-form-urlencoded",
