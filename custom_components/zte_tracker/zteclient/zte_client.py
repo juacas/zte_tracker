@@ -87,6 +87,17 @@ _MODELS["F6600P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
 _MODELS["H6645P"] = _MODELS["H288A"]
 _MODELS["H3640"] = _MODELS["H288A"]
+# ZTE H6745 V3 (Dimensione ISP), firmware V3.0.0P7_IT. export_support_bundle
+# in #74 showed LAN/WLAN endpoints (accessdev_landevs_lua.lua,
+# accessdev_ssiddev_lua.lua) return clean data, tied structurally between the
+# H288A and H388X profiles. Both candidate WAN status tags
+# (H288A/F6640's wan_internetstatus_lua.lua and H388X's own
+# wan_internet_lua.lua) returned SessionTimeout on this unit, so WAN status
+# is NOT confirmed working (device tracking is unaffected; get_wan_status()
+# catches the error and just omits WAN attributes). A distinct dict (not a
+# plain alias) keeps H6745 isolated so a future WAN-tag fix doesn't touch
+# H288A/other aliases.
+_MODELS["H6745"] = {**_MODELS["H288A"]}
 _MODELS["E2631"] = _MODELS["E2631"]
 _MODELS["SR7410"] = _MODELS["E2631"]
 _MODELS["SR7110"] = _MODELS["E2631"]

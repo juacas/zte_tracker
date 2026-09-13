@@ -187,6 +187,7 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 | ZTE H3600P    |     H3600P      |    ✅    |
 | ZTE H3640 V10 |      H3640      |    ✅    |
 | ZTE H6645P V2 |     H6645P      |    ✅    |
+| ZTE H6745 V3  |      H6745      |    ✅    |
 | ZTE AX3000    |      AX3000    |    ✅    |
 | ZTE SR7410 (ZTE BE7200 Pro+)   |      SR7410      |    ✅    |
 
@@ -195,6 +196,8 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 > **Not listed?** Try each value above first, then run [`zte_tracker.export_support_bundle`](#zte_trackerexport_support_bundle) and attach the file to an issue.
 
 > **F8748 note**: Verified on a unit provided by **DIGI Portugal** (firmware `V3.0.10P2N4`, hardware `V3.0.03`). It shares the F6640 web-console endpoints, and is defined as a distinct model because this firmware additionally exposes **WAN traffic counters** in `wan_internetstatus_lua.lua`. When the model is `F8748`, the integration parses those into extra router-status attributes: `WAN_rx_bytes`, `WAN_tx_bytes`, `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors`. This is gated to `F8748` so other F6640-family routers are unaffected (we could not confirm they populate the same fields). DIGI units in other countries (e.g. Spain, Romania) are likely identical; F8748 units from other providers or bought retail may expose additional pages/data we could not confirm.
+
+> **H6745 note**: Reported for a unit on **Dimensione** (firmware `V3.0.0P7_IT`). LAN and WLAN device tracking are confirmed working via an `export_support_bundle` diagnostic (#74). WAN status (`wan_internetstatus_lua.lua`) returned a session error on that same unit and is **not confirmed** for this model; the error is caught and only WAN attributes (uptime, connection state) are omitted, device tracking is unaffected. You can disable **Query WAN status** in the integration options to skip the (currently failing) request for this router.
 
 ## 🚀 Installation
 
@@ -385,6 +388,7 @@ pytest custom_components/zte_tracker/tests/
 - **@onegambler** for H3600P verification
 - **@lapo** for H6645P verification
 - **@309631** for H3640 verification
+- **@stefanosalatini** for H6745 support bundle (#74)
 - **@LZDEROH** for AX3000 verification
 - **@gradypark86** for SR7410 verification
 

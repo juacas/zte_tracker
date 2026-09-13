@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Support for the ZTE H6745 V3 (Dimensione ISP) router model, aliased to the H288A profile for LAN/WLAN tracking. Reported and diagnosed via `export_support_bundle` in [#74](https://github.com/juacas/zte_tracker/issues/74) by @stefanosalatini. WAN status is not confirmed for this model (see README H6745 note); the error is caught and device tracking is unaffected.
+
 ## v2.1.0
 
 ### Added
