@@ -54,18 +54,6 @@ _MODELS = {
         "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
         "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
         "default_scheme": "https",
-    },
-    "H2640": {
-        "wlan_script": "accessdev_ssiddev_lua.lua",
-        "wlan_id_element": "OBJ_ACCESSDEV_ID",
-        "lan_script": "accessdev_landevs_lua.lua",
-        "lan_id_element": "OBJ_ACCESSDEV_ID",
-        "type_first_request": "menuView",
-        "type_main_request": "menuData",
-        "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
-        "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
-        "default_scheme": "https",
-        "reboot_check_encrypted": False,  # H2640: the router expects unencrypted SHA256 hex, not RSA
     },    
     "H388X": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
@@ -102,6 +90,12 @@ _MODELS["E2631"] = _MODELS["E2631"]
 _MODELS["SR7410"] = _MODELS["E2631"]
 _MODELS["SR7110"] = _MODELS["E2631"]
 _MODELS["F680"] = _MODELS["F6640"]
+# ZTE H2640: shares H288A's endpoints but the router verifies an
+# unencrypted SHA256 hex digest in the reboot Check header, not RSA-encrypted.
+_MODELS["H2640"] = {
+    **_MODELS["H288A"],
+    "reboot_check_encrypted": False,
+}
 # ZTE F8748 (GPON ONT) - DIGI Portugal ISP unit, firmware V3.0.10P2N4.
 # Defined as a distinct model (not a plain F6640 alias): it shares the F6640
 # web-console endpoints, but this firmware also exposes WAN traffic counters
@@ -976,38 +970,37 @@ class zteClient:
 
             post_data = f"IF_ACTION=Restart&Btn_restart=&_sessionTOKEN={session_token}"
             digest_str = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
-            # F6600P uses a 4096-bit RSA key, other models use 2048-bit
-            if self.model == "F6600P":
-                pub_key_pem = (
-                    "-----BEGIN PUBLIC KEY-----\n"
-                    "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAwlo/vZBnSJ2MyJ0dbNcw\n"
-                    "DvzPqBN+O/BPvLX93GIJVSZmquJHD9X6Xn6VYeM9mRKzjEbXPlv73Dj/gjjtNj9j\n"
-                    "Tq2QVyW2Sd4ZkY9e3h1ALCCCfkbjnmSqedyrcvXriTeW+J65jhBje6lTJbafmC5q\n"
-                    "bGiItjt0OeOkT+Vb4S7hYPSWIjeYYBh+7Y/fg25Rt2a+RgC8dahvJ3ttB1LHXADr\n"
-                    "oCm6q7G+lpbRAlpC8jjc0rZdS0c6HcBoYgzW8vxjj2fTuFy3CZZTrpPyTv/C8K6B\n"
-                    "hjTnjRe6ocgFVyQ0RIYfx2hxSJcuauR57OzfMzlgFQv3RAXguDZtuVUFLO2sAiwL\n"
-                    "ELph3Acfy9Eh58SHcswZvsOSXY0JNb0XeRM9gxpntLRfM6TB7f9hYtYTDw5oKdyN\n"
-                    "BY+nnEa/IpBUjndGDrSs3Z4BxRbYcJEwkKQZkvw/5TpQYbkD6sTRVSlZPaXSjeCl\n"
-                    "0hsLCttqwJqRZcjbWXrINBYFw8PYE14Xr9BCyPgqocdQh7FgvasVgG6u5mLR1PBZ\n"
-                    "o4EFF/LdY0yvMG5rl9egBk1XD/UMayhRtmSQEUzYt3eEWLBbqJB6MbVJ2ygcv5EL\n"
-                    "ReDY0SWXw1PIEbHeP51A/MyB6kwSgZwdoQW3JiaPnGHMaE0NqfAYPNiGJLMsmvT/\n"
-                    "rNUI/8iSCW+WvSzx9tByUxsCAwEAAQ==\n"
-                    "-----END PUBLIC KEY-----"
-                )
-            else:
-                pub_key_pem = (
-                    "-----BEGIN PUBLIC KEY-----\n"
-                    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAodPTerkUVCYmv28SOfRV\n"
-                    "7UKHVujx/HjCUTAWy9l0L5H0JV0LfDudTdMNPEKloZsNam3YrtEnq6jqMLJV4ASb\n"
-                    "1d6axmIgJ636wyTUS99gj4BKs6bQSTUSE8h/QkUYv4gEIt3saMS0pZpd90y6+B/9\n"
-                    "hZxZE/RKU8e+zgRqp1/762TB7vcjtjOwXRDEL0w71Jk9i8VUQ59MR1Uj5E8X3WIc\n"
-                    "fYSK5RWBkMhfaTRM6ozS9Bqhi40xlSOb3GBxCmliCifOJNLoO9kFoWgAIw5hkSIb\n"
-                    "GH+4Csop9Uy8VvmmB+B3ubFLN35qIa5OG5+SDXn4L7FeAA5lRiGxRi8tsWrtew8w\n"
-                    "nwIDAQAB\n"
-                    "-----END PUBLIC KEY-----"
-                )
-
-            if self.paths.get("reboot_check_encrypted", True):
+            if self.paths.get("reboot_check_encrypted", True):            
+                # F6600P uses a 4096-bit RSA key, other models use 2048-bit
+                if self.model == "F6600P":
+                    pub_key_pem = (
+                        "-----BEGIN PUBLIC KEY-----\n"
+                        "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAwlo/vZBnSJ2MyJ0dbNcw\n"
+                        "DvzPqBN+O/BPvLX93GIJVSZmquJHD9X6Xn6VYeM9mRKzjEbXPlv73Dj/gjjtNj9j\n"
+                        "Tq2QVyW2Sd4ZkY9e3h1ALCCCfkbjnmSqedyrcvXriTeW+J65jhBje6lTJbafmC5q\n"
+                        "bGiItjt0OeOkT+Vb4S7hYPSWIjeYYBh+7Y/fg25Rt2a+RgC8dahvJ3ttB1LHXADr\n"
+                        "oCm6q7G+lpbRAlpC8jjc0rZdS0c6HcBoYgzW8vxjj2fTuFy3CZZTrpPyTv/C8K6B\n"
+                        "hjTnjRe6ocgFVyQ0RIYfx2hxSJcuauR57OzfMzlgFQv3RAXguDZtuVUFLO2sAiwL\n"
+                        "ELph3Acfy9Eh58SHcswZvsOSXY0JNb0XeRM9gxpntLRfM6TB7f9hYtYTDw5oKdyN\n"
+                        "BY+nnEa/IpBUjndGDrSs3Z4BxRbYcJEwkKQZkvw/5TpQYbkD6sTRVSlZPaXSjeCl\n"
+                        "0hsLCttqwJqRZcjbWXrINBYFw8PYE14Xr9BCyPgqocdQh7FgvasVgG6u5mLR1PBZ\n"
+                        "o4EFF/LdY0yvMG5rl9egBk1XD/UMayhRtmSQEUzYt3eEWLBbqJB6MbVJ2ygcv5EL\n"
+                        "ReDY0SWXw1PIEbHeP51A/MyB6kwSgZwdoQW3JiaPnGHMaE0NqfAYPNiGJLMsmvT/\n"
+                        "rNUI/8iSCW+WvSzx9tByUxsCAwEAAQ==\n"
+                        "-----END PUBLIC KEY-----"
+                    )
+                else:
+                    pub_key_pem = (
+                        "-----BEGIN PUBLIC KEY-----\n"
+                        "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAodPTerkUVCYmv28SOfRV\n"
+                        "7UKHVujx/HjCUTAWy9l0L5H0JV0LfDudTdMNPEKloZsNam3YrtEnq6jqMLJV4ASb\n"
+                        "1d6axmIgJ636wyTUS99gj4BKs6bQSTUSE8h/QkUYv4gEIt3saMS0pZpd90y6+B/9\n"
+                        "hZxZE/RKU8e+zgRqp1/762TB7vcjtjOwXRDEL0w71Jk9i8VUQ59MR1Uj5E8X3WIc\n"
+                        "fYSK5RWBkMhfaTRM6ozS9Bqhi40xlSOb3GBxCmliCifOJNLoO9kFoWgAIw5hkSIb\n"
+                        "GH+4Csop9Uy8VvmmB+B3ubFLN35qIa5OG5+SDXn4L7FeAA5lRiGxRi8tsWrtew8w\n"
+                        "nwIDAQAB\n"
+                        "-----END PUBLIC KEY-----"
+                    )
                 public_key = serialization.load_pem_public_key(
                     pub_key_pem.encode("utf-8")
                 )
