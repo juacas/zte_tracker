@@ -117,16 +117,29 @@ ENUM_FIELDS = frozenset(
         "enable",
     }
 )
+# (node, field) pairs too generic to allowlist globally (e.g. "Status" can carry an SSID elsewhere), but safe on this specific node.
+NODE_SCOPED_ENUM_FIELDS = frozenset(
+    {
+        ("obj_dslinterface_id", "status"),  # H2640 DSL line sync (#75)
+    }
+)
 _ENUM_VALUE = re.compile(r"^[A-Za-z0-9_.:+-]{1,16}$")
 
 
-def _field(name: str, value: Any) -> dict[str, Any]:
+def _field(name: str, value: Any, node: str = "") -> dict[str, Any]:
     """Describe one field. Exact length is itself a small disclosure for a
     secret, so those are bucketed rather than measured."""
     text = str(value or "")
     # The enum list wins over the name gate: WANCName contains "name", and its
     # value is the one thing that says which instance is the internet WAN.
-    if name.casefold() in ENUM_FIELDS:
+    if (
+        name.casefold() in ENUM_FIELDS
+        or (
+            node.casefold(),
+            name.casefold(),
+        )
+        in NODE_SCOPED_ENUM_FIELDS
+    ):
         described: dict[str, Any] = {"shape": shape_of(value), "len": len(text)}
         if _ENUM_VALUE.match(text):
             described["value"] = text
@@ -142,6 +155,7 @@ def _describe_xml(root: ET.Element) -> dict[str, Any]:
 
     for node in list(root):
         tag = node.tag.rpartition("}")[2]
+        node_tag = tag
         # The IF_ERROR* envelope is a fixed firmware enumeration, and it is the
         # difference between "this endpoint returned no devices" and "the
         if tag.startswith("IF_"):
@@ -170,14 +184,16 @@ def _describe_xml(root: ET.Element) -> dict[str, Any]:
                     name = (child.text or "").strip()
                 elif tag == "ParaValue" and name is not None:
                     entry["fields"].setdefault(
-                        safe_name(name), _field(name, child.text)
+                        safe_name(name), _field(name, child.text, node_tag)
                     )
                     name = None
                 elif tag not in ("ParaName", "ParaValue"):
-                    entry["fields"].setdefault(safe_name(tag), _field(tag, child.text))
+                    entry["fields"].setdefault(
+                        safe_name(tag), _field(tag, child.text, node_tag)
+                    )
             if instance is node and node.text and node.text.strip():
                 entry["fields"].setdefault(
-                    "#text", _field(node.tag.rpartition("}")[2], node.text)
+                    "#text", _field(node.tag.rpartition("}")[2], node.text, node_tag)
                 )
 
         if len(nodes) >= MAX_NODES:

@@ -118,3 +118,111 @@ class TestzteClient(TestCase):
         expected_digest = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
 
         self.assertEqual(check_header, expected_digest)
+
+    # --- get_wan_status() DSL parsing test (H2640, from issue #75) ---
+
+    def test_get_wan_status_dsl_h2640(self):
+        """H2640 reports its WAN line on dsl_interface_status_lua.lua (OBJ_DSLINTERFACE_ID), not the Ethernet-style ID_WAN_COMFIG node. Uses the real router capture attached to issue #75."""
+        client = zteClient(self.host, "admin", self.password, "H2640")
+        client.session = MagicMock()
+
+        view_response = MagicMock()
+        view_response.raise_for_status = MagicMock()
+        client.session.get.return_value = view_response
+
+        data_response = MagicMock()
+        data_response.raise_for_status = MagicMock()
+        data_response.text = """<ajax_response_xml_root>
+    <IF_ERRORPARAM>SUCC</IF_ERRORPARAM>
+    <IF_ERRORTYPE>SUCC</IF_ERRORTYPE>
+    <IF_ERRORSTR>SUCC</IF_ERRORSTR>
+    <IF_ERRORID>0</IF_ERRORID>
+    <OBJ_DSLINTERFACE_ID>
+        <Instance>
+            <ParaName>_InstID</ParaName>
+            <ParaValue>IGD.WD1.LINE0</ParaValue>
+            <ParaName>Enable</ParaName>
+            <ParaValue>1</ParaValue>
+            <ParaName>Upstream_noise_margin</ParaName>
+            <ParaValue>59</ParaValue>
+            <ParaName>Upstream_max_rate</ParaName>
+            <ParaValue>16094</ParaValue>
+            <ParaName>Downstream_max_rate</ParaName>
+            <ParaValue>40879</ParaValue>
+            <ParaName>Upstream_current_rate</ParaName>
+            <ParaValue>16094</ParaValue>
+            <ParaName>Downstream_noise_margin</ParaName>
+            <ParaValue>59</ParaValue>
+            <ParaName>tLinkEncapsulationUsed</ParaName>
+            <ParaValue>G.993.2_Annex_K_PTM</ParaValue>
+            <ParaName>Downstream_current_rate</ParaName>
+            <ParaValue>40315</ParaValue>
+            <ParaName>Downstream_attenuation</ParaName>
+            <ParaValue>393</ParaValue>
+            <ParaName>CurrentProfile</ParaName>
+            <ParaValue>35b</ParaValue>
+            <ParaName>Status</ParaName>
+            <ParaValue>Up</ParaValue>
+            <ParaName>Upstream_attenuation</ParaName>
+            <ParaValue>199</ParaValue>
+            <ParaName>Module_type</ParaName>
+            <ParaValue>VDSL2</ParaValue>
+        </Instance>
+    </OBJ_DSLINTERFACE_ID>
+</ajax_response_xml_root>"""
+        client.session.get.side_effect = [view_response, data_response]
+
+        wan_attrs = client.get_wan_status()
+
+        self.assertEqual(wan_attrs["DSL_line_status"], "Up")
+        self.assertEqual(wan_attrs["DSL_upstream_rate_kbps"], 16094)
+        self.assertEqual(wan_attrs["DSL_downstream_rate_kbps"], 40315)
+        self.assertEqual(wan_attrs["DSL_upstream_max_rate_kbps"], 16094)
+        self.assertEqual(wan_attrs["DSL_downstream_max_rate_kbps"], 40879)
+        self.assertEqual(wan_attrs["DSL_upstream_noise_margin"], 59)
+        self.assertEqual(wan_attrs["DSL_downstream_noise_margin"], 59)
+        self.assertEqual(wan_attrs["DSL_upstream_attenuation"], 199)
+        self.assertEqual(wan_attrs["DSL_downstream_attenuation"], 393)
+        self.assertEqual(wan_attrs["DSL_profile"], "35b")
+        self.assertEqual(wan_attrs["DSL_encapsulation"], "G.993.2_Annex_K_PTM")
+        # DSL sync != Internet reachability, and no Ethernet-style keys leak in.
+        self.assertNotIn("WAN_connected", wan_attrs)
+        self.assertNotIn("WAN_uptime", wan_attrs)
+        self.assertNotIn("WAN_error_message", wan_attrs)
+
+    def test_get_wan_status_default_model_is_unaffected(self):
+        """Regression guard for the H2640 DSL branch (#75/#82): any model without wan_status_kind="dsl" must keep hitting ID_WAN_COMFIG and parsing WANCName/ConnStatus/UpTime exactly as before."""
+        client = zteClient(self.host, "admin", self.password, "F6640")
+        client.session = MagicMock()
+
+        view_response = MagicMock()
+        view_response.raise_for_status = MagicMock()
+        client.session.get.return_value = view_response
+
+        data_response = MagicMock()
+        data_response.raise_for_status = MagicMock()
+        data_response.text = """<ajax_response_xml_root>
+    <IF_ERRORSTR>SUCC</IF_ERRORSTR>
+    <ID_WAN_COMFIG>
+        <Instance>
+            <ParaName>WANCName</ParaName>
+            <ParaValue>WAN_internet</ParaValue>
+            <ParaName>ConnStatus</ParaName>
+            <ParaValue>Connected</ParaValue>
+            <ParaName>UpTime</ParaName>
+            <ParaValue>12345</ParaValue>
+            <ParaName>RemainLeaseTime</ParaName>
+            <ParaValue>600</ParaValue>
+        </Instance>
+    </ID_WAN_COMFIG>
+</ajax_response_xml_root>"""
+        client.session.get.side_effect = [view_response, data_response]
+
+        wan_attrs = client.get_wan_status()
+
+        self.assertEqual(wan_attrs["WAN_connected"], True)
+        self.assertEqual(wan_attrs["WAN_uptime"], 12345)
+        self.assertEqual(wan_attrs["WAN_remain_leasetime"], 600)
+        # DSL-only keys must never appear for a non-DSL profile.
+        self.assertNotIn("DSL_upstream_rate_kbps", wan_attrs)
+        self.assertNotIn("DSL_profile", wan_attrs)

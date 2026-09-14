@@ -92,9 +92,13 @@ _MODELS["SR7110"] = _MODELS["E2631"]
 _MODELS["F680"] = _MODELS["F6640"]
 # ZTE H2640: shares H288A's endpoints but the router verifies an
 # unencrypted SHA256 hex digest in the reboot Check header, not RSA-encrypted.
+# Also a VDSL/ADSL modem: WAN status via dsl_interface_status_lua.lua.
 _MODELS["H2640"] = {
     **_MODELS["H288A"],
     "reboot_check_encrypted": False,
+    "tag_wan_status_data": "dsl_interface_status_lua.lua&TypeUplink=2&pageType=1",
+    "wan_status_root": "OBJ_DSLINTERFACE_ID",
+    "wan_status_kind": "dsl",
 }
 # ZTE F8748 (GPON ONT) - DIGI Portugal ISP unit, firmware V3.0.10P2N4.
 # Defined as a distinct model (not a plain F6640 alias): it shares the F6640
@@ -754,12 +758,40 @@ class zteClient:
             r.raise_for_status()
             self.log_request(r)
             xml = ET.fromstring(r.text)
-            instances = xml.findall("ID_WAN_COMFIG/Instance")
+            wan_status_root = self.paths.get("wan_status_root", "ID_WAN_COMFIG")
+            instances = xml.findall(f"{wan_status_root}/Instance")
             # Check error in response.
             error_str = xml.findtext("IF_ERRORSTR")
             if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
                 _LOGGER.error("Router error: %s", error_str)
                 raise Exception(f"Router error: {error_str}")
+
+            if self.paths.get("wan_status_kind") == "dsl":
+                # DSL sync status, kept separate from WAN_connected (Internet reachability).
+                dsl_map = {
+                    "Status": ("DSL_line_status", str),
+                    "Upstream_current_rate": ("DSL_upstream_rate_kbps", int),
+                    "Downstream_current_rate": ("DSL_downstream_rate_kbps", int),
+                    "Upstream_max_rate": ("DSL_upstream_max_rate_kbps", int),
+                    "Downstream_max_rate": ("DSL_downstream_max_rate_kbps", int),
+                    "Upstream_noise_margin": ("DSL_upstream_noise_margin", int),
+                    "Downstream_noise_margin": ("DSL_downstream_noise_margin", int),
+                    "Upstream_attenuation": ("DSL_upstream_attenuation", int),
+                    "Downstream_attenuation": ("DSL_downstream_attenuation", int),
+                    "CurrentProfile": ("DSL_profile", str),
+                    "tLinkEncapsulationUsed": ("DSL_encapsulation", str),
+                }
+                for inst in instances:
+                    for i in range(0, len(inst) // 2):
+                        pname = inst[i * 2].text
+                        pvalue = inst[i * 2 + 1].text
+                        if pname in dsl_map and pvalue is not None:
+                            key, caster = dsl_map[pname]
+                            try:
+                                wan_attrs[key] = caster(pvalue)
+                            except (TypeError, ValueError):
+                                pass
+                return wan_attrs
 
             wan_node = None
             for inst in instances:

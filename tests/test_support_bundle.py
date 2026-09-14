@@ -505,6 +505,30 @@ class TestSufficiency(BundleTest):
         router = _Router({"": _Response(body)})
         self.assertNotIn("MyHouseWiFi", str(self.bundle(router)))
 
+    def test_dsl_status_is_revealed_only_for_the_dsl_node(self):
+        """#75: DSL Status is enum-critical (sync up/down), but scoped to OBJ_DSLINTERFACE_ID so a Status field elsewhere stays redacted."""
+        h2640_profiles = {
+            **PROFILES,
+            "H2640": {
+                "wlan_script": "accessdev_ssiddev_lua.lua",
+                "lan_script": "accessdev_landevs_lua.lua",
+                "tag_wan_status_data": "dsl_interface_status_lua.lua",
+                "type_main_request": "menuData",
+            },
+        }
+        body = (
+            f"<ajax_response_xml_root>{ENVELOPE}<OBJ_DSLINTERFACE_ID><Instance>"
+            "<ParaName>Status</ParaName><ParaValue>Up</ParaValue>"
+            "</Instance></OBJ_DSLINTERFACE_ID></ajax_response_xml_root>"
+        )
+        router = _Router({"dsl_interface_status_lua.lua": _Response(body)})
+        router.paths = h2640_profiles["H2640"]
+        router.get_profiles = lambda: h2640_profiles
+        fields = self.bundle(router)["probes"]["H2640_wan"]["structure"]["nodes"][
+            "OBJ_DSLINTERFACE_ID"
+        ]["fields"]
+        self.assertEqual(fields["Status"]["value"], "Up")
+
     def test_the_file_carries_no_internal_plumbing(self):
         bundle = self.bundle(_Router({"": _Response(devices_xml(count=2))}))
         self.assertNotIn("_probe_owners", bundle)
