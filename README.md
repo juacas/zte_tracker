@@ -350,6 +350,20 @@ The integration automatically detects and supports legacy YAML configurations wh
 
 Your existing device trackers and automations will continue working without changes.
 
+## 🗺️ Roadmap
+
+Planned improvements, no ETA:
+
+| Item | Description |
+|------|-------------|
+| PON/optical health sensors | Expose Rx/Tx optical power, temperature, voltage, bias current (GPON ONT models) - early fiber-degradation warning |
+| Promote router attributes to sensors | CPU/memory/WAN traffic counters as first-class `SensorEntity` instead of attributes, for HA history/graphing |
+| Surface unused WAN fields | Public WAN IPv4, DNS, gateway, VLAN ID, IPv6 GUA, connection mode already parsed but not exposed |
+| Quality Scale self-audit | Add `quality_scale.yaml`, assess against HA Bronze/Silver rules |
+| Firmware `update` entity | Use already-scraped firmware version for HA's `update` platform |
+| SSDP/DHCP discovery | Zero-config setup via manifest discovery block |
+| `aiohttp` migration | Replace `requests`/executor pattern with native async client (required for HA core Platinum tier) |
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please:
