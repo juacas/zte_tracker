@@ -38,3 +38,9 @@ body:
       label: If you could not install it, what did Home Assistant say?
       description: Adding the integration fails if no known endpoint returns devices, so an unsupported model often cannot get far enough to run the export.
       placeholder: Connected but could not retrieve device data.
+
+  - type: textarea
+    id: raw_xml
+    attributes:
+      label: Raw XML (only if a maintainer asks for it)
+      description: The bundle only reports field shapes, not values, for anything it does not already recognize, so it can miss what a new page actually means. If asked, follow "Reverse-Engineering the Router Web Console" in the README to capture the real request/response and paste it here.
