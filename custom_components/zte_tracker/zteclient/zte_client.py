@@ -90,6 +90,12 @@ _MODELS["H6745"] = _MODELS["H288A"]
 _MODELS["E2631"] = _MODELS["E2631"]
 _MODELS["SR7410"] = _MODELS["E2631"]
 _MODELS["SR7110"] = _MODELS["E2631"]
+# ZXSLC SR7115/SR7011/SR6110 (BE5100 Pro+/BE3600 Pro/AX3000 Pro+ mesh line):
+# a reporter's own working script in #43 confirms the same vue_mainwan_data,
+# localnet_lan_info_lua and vueData/ajax_response_xml_root tags as E2631.
+_MODELS["SR7115"] = _MODELS["E2631"]
+_MODELS["SR7011"] = _MODELS["E2631"]
+_MODELS["SR6110"] = _MODELS["E2631"]
 _MODELS["F680"] = _MODELS["F6640"]
 # ZTE H2640: shares H288A's endpoints but the router verifies an
 # unencrypted SHA256 hex digest in the reboot Check header, not RSA-encrypted.

@@ -190,6 +190,10 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 | ZTE H6745 V3  |      H6745      |    ✅    |
 | ZTE AX3000    |      AX3000    |    ✅    |
 | ZTE SR7410 (ZTE BE7200 Pro+)   |      SR7410      |    ✅    |
+| ZXSLC SR7110 (ZTE BE5100 Pro+) |      SR7110      |    ✅    |
+| ZXSLC SR7115 (ZTE BE5100 Pro+) |      SR7115      |    ✅    |
+| ZXSLC SR7011 (ZTE BE3600 Pro)  |      SR7011      |    ✅    |
+| ZXSLC SR6110 (ZTE AX3000 Pro+) |      SR6110      |    ✅    |
 
 > **Note**: This integration may work with additional ZTE router models. Try one of the above parameter values to test compatibility.
 
@@ -389,6 +393,7 @@ pytest custom_components/zte_tracker/tests/
 - **@stefanosalatini** for H6745 support bundle (#74)
 - **@LZDEROH** for AX3000 verification
 - **@gradypark86** for SR7410 verification
+- **@MarcPolaris** for SR7115/SR7011/SR6110 endpoint verification
 
 
 ## 📄 License
