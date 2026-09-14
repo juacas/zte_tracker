@@ -1,9 +1,13 @@
+import base64
 import hashlib
 import logging
 import os
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+from cryptography.hazmat.primitives.asymmetric import padding as crypto_padding
+
+from custom_components.zte_tracker.zteclient import zte_client as zte_client_module
 from custom_components.zte_tracker.zteclient.zte_client import zteClient
 
 
@@ -35,7 +39,7 @@ class TestzteClient(TestCase):
         self.assertGreaterEqual(len(devices), 1)
 
     # --- reboot() Check header tests (no real router required) ---
-
+    
     def _mock_reboot_dependencies(self, client, session_token="TESTTOKEN"):
         """Stub out login/session so reboot() runs without touching a real router."""
         client.login = MagicMock(return_value=True)
@@ -45,12 +49,10 @@ class TestzteClient(TestCase):
         mock_session = MagicMock()
         client.session = mock_session
 
-        # menuView GET (rebootAndReset) just needs to not raise
         get_response = MagicMock()
         get_response.raise_for_status = MagicMock()
         mock_session.get.return_value = get_response
 
-        # POST response: successful XML body
         post_response = MagicMock()
         post_response.raise_for_status = MagicMock()
         post_response.content = (
@@ -63,22 +65,41 @@ class TestzteClient(TestCase):
         return mock_session
 
     def test_reboot_check_header_encrypted(self):
-        """Models with reboot_check_encrypted=True (default) must send an
-        RSA-encrypted Check header, not the raw SHA256 hex digest."""
+        """Models with reboot_check_encrypted=True (default) must encrypt the
+        SHA256 hex digest of the POST body with the model's RSA public key
+        under PKCS1v15 padding, then base64-encode the result as Check."""
         client = zteClient(self.host, "admin", self.password, "F6640")
-        mock_session = self._mock_reboot_dependencies(client, session_token="TESTTOKEN")
+        session_token = "TESTTOKEN"
+        mock_session = self._mock_reboot_dependencies(client, session_token=session_token)
 
-        result = client.reboot()
+        fake_ciphertext = b"FAKE_ENCRYPTED_BYTES"
+        mock_public_key = MagicMock()
+        mock_public_key.encrypt.return_value = fake_ciphertext
+
+        with patch.object(
+            zte_client_module.serialization,
+            "load_pem_public_key",
+            return_value=mock_public_key,
+        ) as mock_load_key:
+            result = client.reboot()
 
         self.assertTrue(result)
+        mock_load_key.assert_called_once()
+
+        post_data = f"IF_ACTION=Restart&Btn_restart=&_sessionTOKEN={session_token}"
+        expected_digest = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
+
+        mock_public_key.encrypt.assert_called_once()
+        call_args, _ = mock_public_key.encrypt.call_args
+        encrypted_input, used_padding = call_args[0], call_args[1]
+        self.assertEqual(encrypted_input, expected_digest.encode("utf-8"))
+        self.assertIsInstance(used_padding, crypto_padding.PKCS1v15)
+
         _, kwargs = mock_session.post.call_args
         check_header = kwargs["headers"]["Check"]
-
-        # A raw SHA256 hex digest is 64 hex chars; the encrypted header is
-        # base64-encoded RSA ciphertext and must not look like that.
-        self.assertNotEqual(len(check_header), 64)
-        with self.assertRaises(ValueError):
-            int(check_header, 16)
+        self.assertEqual(
+            check_header, base64.b64encode(fake_ciphertext).decode("utf-8")
+        )
 
     def test_reboot_check_header_unencrypted(self):
         """H2640 (reboot_check_encrypted=False) must send the raw SHA256 hex
