@@ -780,6 +780,14 @@ class zteClient:
                         wan_attrs["WAN_remain_leasetime"] = int(pvalue)
                     elif pname == "ConnStatus":
                         wan_attrs["WAN_connected"] = pvalue == "Connected"
+                    elif pname == "IPAddress":
+                        wan_attrs["WAN_public_ip"] = pvalue
+                    elif pname == "GateWay":
+                        wan_attrs["WAN_gateway"] = pvalue
+                    elif pname == "SubnetMask":
+                        wan_attrs["WAN_subnet_mask"] = pvalue
+                    elif pname in ("DNS1", "DNS2", "DNS3") and pvalue:
+                        wan_attrs.setdefault("WAN_dns_servers", []).append(pvalue)
             # WAN traffic counters. Model-gated: only enabled for firmwares
             # confirmed (via web-console capture) to expose these fields, since
             # other F6640-family routers may not populate them. On the F8748 the

@@ -342,8 +342,12 @@ def _probe_matrix(profiles: dict[str, dict[str, Any]]) -> dict[str, tuple[str, s
         for label, key, type_key in (
             ("lan", "lan_script", "type_main_request"),
             ("wlan", "wlan_script", "type_main_request"),
-            ("wan", "tag_wan_status_data", "type_main_request"),
+            # wan_view (MenuView) must run before wan (MenuData): the router
+            # only returns real WAN data if the view was requested first,
+            # otherwise it answers SessionTimeout. get_wan_status() does the
+            # same view-then-data sequence for this reason.
             ("wan_view", "tag_wan_status_view", "type_first_request"),
+            ("wan", "tag_wan_status_data", "type_main_request"),
         ):
             tag = paths.get(key)
             if not tag:
