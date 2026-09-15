@@ -106,13 +106,7 @@ _MODELS["F8748"] = {
     **_MODELS["F6640"],
     "parse_wan_traffic": True,
 }
-# ZTE F6600P - confirmed by live testing against a real unit (2026-09-15).
-# Defined as a distinct model (not a plain F6640 alias): only this specific
-# router has been confirmed to expose GPON optical diagnostics (Rx/Tx power,
-# voltage, temperature, laser bias current, loss-of-signal, registration
-# status) via ponopticalinfo/optical_info_lua.lua. Other F6640-family routers
-# may not be GPON ONTs at all, so "tag_pon_optical_*" is opt-in per model
-# rather than assumed for the whole family.
+# Distinct model, not a plain F6640 alias: only this unit is confirmed to expose GPON optical diagnostics, so tag_pon_optical_* stays opt-in per model.
 _MODELS["F6600P"] = {
     **_MODELS["F6640"],
     "tag_pon_optical_view": "ponopticalinfo&Menu3Location=0",
@@ -825,19 +819,12 @@ class zteClient:
                             wan_attrs[traffic_map[pn]] = int(pv)
         except Exception as ex:
             _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
-        # PON optical diagnostics: separate request pair, model-gated inside
-        # get_pon_optical_info() itself, so this is a no-op on other models.
+        # model-gated no-op elsewhere; see get_pon_optical_info().
         wan_attrs.update(self.get_pon_optical_info())
         return wan_attrs
 
     def get_pon_optical_info(self) -> dict[str, Any]:
-        """Fetch GPON optical diagnostics (Rx/Tx power, temperature, alarms).
-
-        Model-gated via tag_pon_optical_view/tag_pon_optical_data: only
-        confirmed (by live capture) on the F6600P so far, other F6640-family
-        routers may not be GPON ONTs at all. Returns {} if the model doesn't
-        define these tags, same convention as parse_wan_traffic.
-        """
+        """Fetch GPON optical diagnostics. Model-gated: {} unless tag_pon_optical_* is set (F6600P only so far)."""
         view_tag = self.paths.get("tag_pon_optical_view")
         data_tag = self.paths.get("tag_pon_optical_data")
         if not view_tag or not data_tag:
@@ -845,7 +832,7 @@ class zteClient:
 
         pon_attrs: dict[str, Any] = {}
         try:
-            # View must run before data, same reason as get_wan_status().
+            # view must run before data, same reason as get_wan_status().
             url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={view_tag}&_={self.get_guid()}"
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
@@ -870,10 +857,7 @@ class zteClient:
                 }
 
             optical = _fields("OBJ_PON_OPTICALPARA_ID")
-            # RxPower/TxPower/Temp already come back as decimal text (e.g.
-            # "-5.23"), so they are used as-is; Volt/Current/RFTxPower are
-            # plain integers of unconfirmed unit, so they are left out rather
-            # than guessed at.
+            # Volt/Current/RFTxPower are plain ints of unconfirmed unit, left out rather than guessed at.
             if optical.get("RxPower") is not None:
                 pon_attrs["PON_rx_power_dbm"] = float(optical["RxPower"])
             if optical.get("TxPower") is not None:

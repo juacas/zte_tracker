@@ -130,12 +130,7 @@ def _analyse(bundle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# Endpoint names the router itself advertises in its pages. Guessing only ever
-# finds what we already know; a firmware family nobody here has seen answers
-# on its own terms. Menu pages (menuView) are named as plain words, e.g.
-# "statusMgr" or "ethWanStatus", with no _lua suffix at all: matching only the
-# _lua-suffixed form (the old pattern) meant the whole left-nav menu tree was
-# invisible to discovery, only its data endpoints were ever found.
+# Menu pages (menuView) are plain words like "statusMgr", no _lua suffix; the old _lua-only pattern made the whole left-nav menu tree invisible to discovery.
 _ADVERTISED_TAG = re.compile(r"_tag=([A-Za-z0-9_.]+)")
 
 # One page mentioning five thousand tags would otherwise be repeated, in full,
@@ -251,9 +246,7 @@ def _fetch(client: Any, url: str) -> dict[str, Any]:
     return entry
 
 
-# A firmware nobody here has seen answers none of the known profiles, and no
-# amount of guessing fixes that. The cap exists because a router that mentions
-# every menu page on every response could otherwise queue an unbounded crawl.
+# Caps the walk: a router mentioning every menu page on every response could otherwise queue an unbounded crawl.
 MAX_DISCOVERED_PROBES = 40
 
 
@@ -280,11 +273,7 @@ def _known_tags(profiles: dict[str, dict[str, Any]]) -> set[str]:
     return {_base_tag(tag) for _, tag in _probe_matrix(profiles).values()}
 
 
-# Discovery must never GET one of these: unlike a data page, requesting them
-# is itself the action. login_entry/login_token mint or consume a session,
-# logout_entry ends the diagnostic's own session mid-walk, modeswitch_entry
-# and switchlang_entry change router-wide settings. All four were only found
-# because the wider tag regex above now also catches plain-word menu tags.
+# Discovery must never GET these: requesting them IS the action (login/logout mint or end a session, modeswitch/switchlang change router-wide settings).
 _UNSAFE_TAG = re.compile(r"(?:^|_)(login|logout|modeswitch|switchlang)(?:_|$)", re.I)
 
 
@@ -380,16 +369,10 @@ def _probe_matrix(profiles: dict[str, dict[str, Any]]) -> dict[str, tuple[str, s
         for label, key, type_key in (
             ("lan", "lan_script", "type_main_request"),
             ("wlan", "wlan_script", "type_main_request"),
-            # wan_view (MenuView) must run before wan (MenuData): the router
-            # only returns real WAN data if the view was requested first,
-            # otherwise it answers SessionTimeout. get_wan_status() does the
-            # same view-then-data sequence for this reason.
+            # view must run before data or the router answers SessionTimeout; see get_wan_status().
             ("wan_view", "tag_wan_status_view", "type_first_request"),
             ("wan", "tag_wan_status_data", "type_main_request"),
-            # Same view-before-data requirement as wan_view/wan. Only models
-            # confirmed to be GPON ONTs define these tags (see F6600P in
-            # zte_client.py); paths.get() returns None for everyone else, so
-            # this loop simply skips them.
+            # only GPON models define these tags (F6600P); paths.get() is None elsewhere, so the loop skips them.
             ("pon_optical_view", "tag_pon_optical_view", "type_first_request"),
             ("pon_optical", "tag_pon_optical_data", "type_main_request"),
         ):
