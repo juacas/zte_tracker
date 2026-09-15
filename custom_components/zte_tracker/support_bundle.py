@@ -278,6 +278,18 @@ def _known_tags(profiles: dict[str, dict[str, Any]]) -> set[str]:
     return {_base_tag(tag) for _, tag in _probe_matrix(profiles).values()}
 
 
+# Discovery must never GET one of these: unlike a data page, requesting them
+# is itself the action. login_entry/login_token mint or consume a session,
+# logout_entry ends the diagnostic's own session mid-walk, modeswitch_entry
+# and switchlang_entry change router-wide settings. All four were only found
+# because the wider tag regex above now also catches plain-word menu tags.
+_UNSAFE_TAG = re.compile(r"(?:^|_)(login|logout|modeswitch|switchlang)(?:_|$)", re.I)
+
+
+def _is_probeable(tag: str) -> bool:
+    return not _UNSAFE_TAG.search(_base_tag(tag))
+
+
 def _discover(
     client: Any,
     bundle: dict[str, Any],
@@ -291,7 +303,11 @@ def _discover(
             advertised.update(entry.get("advertised", []))
 
     queued = {_base_tag(tag) for tag in advertised if _base_tag(tag) not in already}
-    frontier = sorted(tag for tag in advertised if _base_tag(tag) not in already)
+    frontier = sorted(
+        tag
+        for tag in advertised
+        if _base_tag(tag) not in already and _is_probeable(tag)
+    )
 
     discovered: dict[str, Any] = {}
     truncated = False
@@ -312,7 +328,7 @@ def _discover(
         for new_tag in entry.get("advertised", []):
             advertised.add(new_tag)
             base = _base_tag(new_tag)
-            if base in already or base in queued:
+            if base in already or base in queued or not _is_probeable(new_tag):
                 continue
             queued.add(base)
             frontier.append(new_tag)

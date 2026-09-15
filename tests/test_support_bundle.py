@@ -363,6 +363,31 @@ class TestOpenIssues(BundleTest):
         self.assertEqual(probe["status"], 200)
         self.assertEqual(probe["source"], "advertised")
 
+    def test_login_logout_and_modeswitch_tags_are_never_probed(self):
+        """Discovery must record these as advertised endpoints, since the
+        router did name them, but never GET them: login_entry/login_token
+        mint or consume a session, logout_entry ends one, modeswitch_entry
+        and switchlang_entry change router-wide settings. A read-only
+        diagnostic must not be able to log an admin out mid-scan."""
+        router = _Router(
+            {
+                "accessdev_ssiddev_lua.lua": _Response(devices_xml(count=3)),
+                "localNetStatus": _Response(
+                    "<html>?_type=hiddenData&_tag=login_entry"
+                    "?_type=hiddenData&_tag=logout_entry"
+                    "?_type=hiddenData&_tag=modeswitch_entry"
+                    "?_type=hiddenData&_tag=switchlang_entry</html>",
+                    200,
+                    "text/html",
+                ),
+            }
+        )
+        bundle = self.bundle(router)
+
+        for tag in ("login_entry", "logout_entry", "modeswitch_entry", "switchlang_entry"):
+            self.assertIn(tag, bundle["advertised_endpoints"])
+            self.assertNotIn(f"discovered_{tag}", bundle["probes"])
+
     def test_plain_word_menu_pages_are_discovered_and_probed_as_menuview(self):
         """The left-nav menu tree (statusMgr, ethWanStatus, security...) uses
         plain-word tags with no _lua suffix at all. Before this, the
