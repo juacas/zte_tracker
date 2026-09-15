@@ -130,7 +130,11 @@ def _analyse(bundle: dict[str, Any]) -> dict[str, Any]:
 
 # Endpoint names the router itself advertises in its pages. Guessing only ever
 # finds what we already know; a firmware family nobody here has seen answers
-_ADVERTISED_TAG = re.compile(r"_tag=([A-Za-z0-9_.]+(?:_lua\.lua|_lua|\.lua))")
+# on its own terms. Menu pages (menuView) are named as plain words, e.g.
+# "statusMgr" or "ethWanStatus", with no _lua suffix at all: matching only the
+# _lua-suffixed form (the old pattern) meant the whole left-nav menu tree was
+# invisible to discovery, only its data endpoints were ever found.
+_ADVERTISED_TAG = re.compile(r"_tag=([A-Za-z0-9_.]+)")
 
 # One page mentioning five thousand tags would otherwise be repeated, in full,
 # inside every probe entry. Measured at 3.7 MB for a single 200 KB response.
@@ -247,11 +251,26 @@ def _fetch(client: Any, url: str) -> dict[str, Any]:
 
 # A firmware nobody here has seen answers none of the known profiles, and no
 # amount of guessing fixes that. The cap exists because a router that mentions
-MAX_DISCOVERED_PROBES = 12
+# every menu page on every response could otherwise queue an unbounded crawl.
+MAX_DISCOVERED_PROBES = 40
 
 
 def _base_tag(tag: str) -> str:
     return tag.split("&", 1)[0]
+
+
+_LUA_TAG = re.compile(r"(?:_lua\.lua|_lua|\.lua)$")
+
+
+def _discovered_request_type(tag: str) -> str:
+    """menuData for data endpoints, menuView for the plain-word menu pages.
+
+    Every _lua-suffixed tag seen so far is a menuData endpoint; every plain
+    word (statusMgr, localNetStatus, ethWanStatus...) is a menuView page. A
+    tag guessed the wrong way still returns something (an error page, most
+    likely), which is why this is a heuristic and not asserted anywhere.
+    """
+    return "menuData" if _LUA_TAG.search(tag) else "menuView"
 
 
 def _known_tags(profiles: dict[str, dict[str, Any]]) -> set[str]:
@@ -284,8 +303,9 @@ def _discover(
             truncated = True
             break
         tag = frontier.pop(0)
-        url = f"{client.base_url}/?_type=menuData&_tag={tag}" f"&_={client.get_guid()}"
-        entry: dict[str, Any] = {"type": "menuData", "tag": tag, "source": "advertised"}
+        request_type = _discovered_request_type(tag)
+        url = f"{client.base_url}/?_type={request_type}&_tag={tag}" f"&_={client.get_guid()}"
+        entry: dict[str, Any] = {"type": request_type, "tag": tag, "source": "advertised"}
         entry.update(_fetch(client, url))
         discovered[f"discovered_{tag}"] = entry
 

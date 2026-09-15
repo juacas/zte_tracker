@@ -363,6 +363,35 @@ class TestOpenIssues(BundleTest):
         self.assertEqual(probe["status"], 200)
         self.assertEqual(probe["source"], "advertised")
 
+    def test_plain_word_menu_pages_are_discovered_and_probed_as_menuview(self):
+        """The left-nav menu tree (statusMgr, ethWanStatus, security...) uses
+        plain-word tags with no _lua suffix at all. Before this, the
+        discovery regex only matched _lua-suffixed tags, so the entire menu
+        tree was invisible to the walk, only its data endpoints were ever
+        found."""
+        router = _Router(
+            {
+                "accessdev_ssiddev_lua.lua": _Response(devices_xml(count=3)),
+                "localNetStatus": _Response(
+                    "<html>?_type=menuView&_tag=security</html>",
+                    200,
+                    "text/html",
+                ),
+                "security": _Response(
+                    devices_xml("OBJ_SECURITY_ID", 1),
+                    200,
+                    "text/html",
+                ),
+            }
+        )
+        bundle = self.bundle(router)
+
+        self.assertIn("security", bundle["advertised_endpoints"])
+        probe = bundle["probes"]["discovered_security"]
+        self.assertEqual(probe["type"], "menuView")
+        self.assertEqual(probe["status"], 200)
+        self.assertEqual(probe["source"], "advertised")
+
     def test_issue_75_an_advertised_endpoint_is_discovered(self):
         """WAN status lives where no profile looks, but the router names it."""
         router = _Router(
