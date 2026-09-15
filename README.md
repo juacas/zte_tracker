@@ -189,7 +189,7 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 | ZTE H3640 V10 |      H3640      |    ✅    |
 | ZTE H6645P V2 |     H6645P      |    ✅    |
 | ZTE H6745 V3  |      H6745      |    ✅    |
-| ZTE AX3000    |      AX3000    |    ✅    |
+| ZTE AX3000    |      E2631      |    ✅    |
 | ZTE SR7410 (ZTE BE7200 Pro+)   |      SR7410      |    ✅    |
 
 > **Note**: This integration may work with additional ZTE router models. Try one of the above parameter values to test compatibility.
