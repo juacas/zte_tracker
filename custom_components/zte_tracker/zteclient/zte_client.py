@@ -82,7 +82,6 @@ _MODELS = {
 # Add synonyms
 _MODELS["H169A"] = _MODELS["H288A"]
 _MODELS["F6645P"] = _MODELS["F6640"]
-_MODELS["F6600P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
 _MODELS["H6645P"] = _MODELS["H288A"]
 _MODELS["H3640"] = _MODELS["H288A"]
@@ -106,6 +105,12 @@ _MODELS["H2640"] = {
 _MODELS["F8748"] = {
     **_MODELS["F6640"],
     "parse_wan_traffic": True,
+}
+# Distinct model, not a plain F6640 alias: only this unit is confirmed to expose GPON optical diagnostics, so tag_pon_optical_* stays opt-in per model.
+_MODELS["F6600P"] = {
+    **_MODELS["F6640"],
+    "tag_pon_optical_view": "ponopticalinfo&Menu3Location=0",
+    "tag_pon_optical_data": "optical_info_lua.lua",
 }
 
 
@@ -780,6 +785,14 @@ class zteClient:
                         wan_attrs["WAN_remain_leasetime"] = int(pvalue)
                     elif pname == "ConnStatus":
                         wan_attrs["WAN_connected"] = pvalue == "Connected"
+                    elif pname == "IPAddress":
+                        wan_attrs["WAN_public_ip"] = pvalue
+                    elif pname == "GateWay":
+                        wan_attrs["WAN_gateway"] = pvalue
+                    elif pname == "SubnetMask":
+                        wan_attrs["WAN_subnet_mask"] = pvalue
+                    elif pname in ("DNS1", "DNS2", "DNS3") and pvalue:
+                        wan_attrs.setdefault("WAN_dns_servers", []).append(pvalue)
             # WAN traffic counters. Model-gated: only enabled for firmwares
             # confirmed (via web-console capture) to expose these fields, since
             # other F6640-family routers may not populate them. On the F8748 the
@@ -806,7 +819,62 @@ class zteClient:
                             wan_attrs[traffic_map[pn]] = int(pv)
         except Exception as ex:
             _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
+        # model-gated no-op elsewhere; see get_pon_optical_info().
+        wan_attrs.update(self.get_pon_optical_info())
         return wan_attrs
+
+    def get_pon_optical_info(self) -> dict[str, Any]:
+        """Fetch GPON optical diagnostics. Model-gated: {} unless tag_pon_optical_* is set (F6600P only so far)."""
+        view_tag = self.paths.get("tag_pon_optical_view")
+        data_tag = self.paths.get("tag_pon_optical_data")
+        if not view_tag or not data_tag:
+            return {}
+
+        pon_attrs: dict[str, Any] = {}
+        try:
+            # view must run before data, same reason as get_wan_status().
+            url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={view_tag}&_={self.get_guid()}"
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            url = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={data_tag}&_={self.get_guid()}"
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            self.log_request(r)
+            xml = ET.fromstring(r.text)
+
+            error_str = xml.findtext("IF_ERRORSTR")
+            if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
+                _LOGGER.error("Router error: %s", error_str)
+                raise Exception(f"Router error: {error_str}")
+
+            def _fields(node_name: str) -> dict[str, str]:
+                inst = xml.find(f"{node_name}/Instance")
+                if inst is None:
+                    return {}
+                return {
+                    inst[i * 2].text: inst[i * 2 + 1].text
+                    for i in range(len(inst) // 2)
+                }
+
+            optical = _fields("OBJ_PON_OPTICALPARA_ID")
+            # Volt/Current/RFTxPower are plain ints of unconfirmed unit, left out rather than guessed at.
+            if optical.get("RxPower") is not None:
+                pon_attrs["PON_rx_power_dbm"] = float(optical["RxPower"])
+            if optical.get("TxPower") is not None:
+                pon_attrs["PON_tx_power_dbm"] = float(optical["TxPower"])
+            if optical.get("Temp") is not None:
+                pon_attrs["PON_temperature_c"] = float(optical["Temp"])
+
+            los = _fields("OBJ_LOS_INFO_ID")
+            if los.get("LosInfo") is not None:
+                pon_attrs["PON_loss_of_signal"] = los["LosInfo"] != "0"
+
+            reg = _fields("OBJ_GPONREGSTATUS_ID")
+            if reg.get("RegStatus") is not None:
+                pon_attrs["PON_registration_status"] = int(reg["RegStatus"])
+        except Exception as ex:
+            _LOGGER.warning(f"Failed to fetch PON optical info: {ex}")
+        return pon_attrs
 
     _SENSITIVE_HEADERS = frozenset({"cookie", "authorization", "set-cookie"})
 

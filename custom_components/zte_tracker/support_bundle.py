@@ -31,7 +31,6 @@ FIXED_PROBES: dict[str, tuple[str, str]] = {
     "lan_view": ("menuView", "localNetStatus"),
 }
 
-
 # Node names the parsers already understand.
 KNOWN_NODES = frozenset(
     {
@@ -44,6 +43,9 @@ KNOWN_NODES = frozenset(
         "OBJ_POWERONTIME_ID",  # get_router_details
         "OBJ_WLANAP_ID",  # parse_devices, ESSID mapping
         "ID_WAN_COMFIG",  # get_wan_status
+        "OBJ_PON_OPTICALPARA_ID",  # get_pon_optical_info
+        "OBJ_LOS_INFO_ID",  # get_pon_optical_info
+        "OBJ_GPONREGSTATUS_ID",  # get_pon_optical_info
     }
 )
 
@@ -128,9 +130,8 @@ def _analyse(bundle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# Endpoint names the router itself advertises in its pages. Guessing only ever
-# finds what we already know; a firmware family nobody here has seen answers
-_ADVERTISED_TAG = re.compile(r"_tag=([A-Za-z0-9_.]+(?:_lua\.lua|_lua|\.lua))")
+# Menu pages (menuView) are plain words like "statusMgr", no _lua suffix; the old _lua-only pattern made the whole left-nav menu tree invisible to discovery.
+_ADVERTISED_TAG = re.compile(r"_tag=([A-Za-z0-9_.]+)")
 
 # One page mentioning five thousand tags would otherwise be repeated, in full,
 # inside every probe entry. Measured at 3.7 MB for a single 200 KB response.
@@ -245,18 +246,39 @@ def _fetch(client: Any, url: str) -> dict[str, Any]:
     return entry
 
 
-# A firmware nobody here has seen answers none of the known profiles, and no
-# amount of guessing fixes that. The cap exists because a router that mentions
-MAX_DISCOVERED_PROBES = 12
+# Caps the walk: a router mentioning every menu page on every response could otherwise queue an unbounded crawl.
+MAX_DISCOVERED_PROBES = 40
 
 
 def _base_tag(tag: str) -> str:
     return tag.split("&", 1)[0]
 
 
+_LUA_TAG = re.compile(r"(?:_lua\.lua|_lua|\.lua)$")
+
+
+def _discovered_request_type(tag: str) -> str:
+    """menuData for data endpoints, menuView for the plain-word menu pages.
+
+    Every _lua-suffixed tag seen so far is a menuData endpoint; every plain
+    word (statusMgr, localNetStatus, ethWanStatus...) is a menuView page. A
+    tag guessed the wrong way still returns something (an error page, most
+    likely), which is why this is a heuristic and not asserted anywhere.
+    """
+    return "menuData" if _LUA_TAG.search(tag) else "menuView"
+
+
 def _known_tags(profiles: dict[str, dict[str, Any]]) -> set[str]:
     """Every endpoint the matrix already requests, compared without suffixes."""
     return {_base_tag(tag) for _, tag in _probe_matrix(profiles).values()}
+
+
+# Discovery must never GET these: requesting them IS the action (login/logout mint or end a session, modeswitch/switchlang change router-wide settings).
+_UNSAFE_TAG = re.compile(r"(?:^|_)(login|logout|modeswitch|switchlang)(?:_|$)", re.I)
+
+
+def _is_probeable(tag: str) -> bool:
+    return not _UNSAFE_TAG.search(_base_tag(tag))
 
 
 def _discover(
@@ -272,7 +294,11 @@ def _discover(
             advertised.update(entry.get("advertised", []))
 
     queued = {_base_tag(tag) for tag in advertised if _base_tag(tag) not in already}
-    frontier = sorted(tag for tag in advertised if _base_tag(tag) not in already)
+    frontier = sorted(
+        tag
+        for tag in advertised
+        if _base_tag(tag) not in already and _is_probeable(tag)
+    )
 
     discovered: dict[str, Any] = {}
     truncated = False
@@ -284,15 +310,23 @@ def _discover(
             truncated = True
             break
         tag = frontier.pop(0)
-        url = f"{client.base_url}/?_type=menuData&_tag={tag}" f"&_={client.get_guid()}"
-        entry: dict[str, Any] = {"type": "menuData", "tag": tag, "source": "advertised"}
+        request_type = _discovered_request_type(tag)
+        url = (
+            f"{client.base_url}/?_type={request_type}&_tag={tag}"
+            f"&_={client.get_guid()}"
+        )
+        entry: dict[str, Any] = {
+            "type": request_type,
+            "tag": tag,
+            "source": "advertised",
+        }
         entry.update(_fetch(client, url))
         discovered[f"discovered_{tag}"] = entry
 
         for new_tag in entry.get("advertised", []):
             advertised.add(new_tag)
             base = _base_tag(new_tag)
-            if base in already or base in queued:
+            if base in already or base in queued or not _is_probeable(new_tag):
                 continue
             queued.add(base)
             frontier.append(new_tag)
@@ -342,8 +376,12 @@ def _probe_matrix(profiles: dict[str, dict[str, Any]]) -> dict[str, tuple[str, s
         for label, key, type_key in (
             ("lan", "lan_script", "type_main_request"),
             ("wlan", "wlan_script", "type_main_request"),
-            ("wan", "tag_wan_status_data", "type_main_request"),
+            # view must run before data or the router answers SessionTimeout; see get_wan_status().
             ("wan_view", "tag_wan_status_view", "type_first_request"),
+            ("wan", "tag_wan_status_data", "type_main_request"),
+            # only GPON models define these tags (F6600P); paths.get() is None elsewhere, so the loop skips them.
+            ("pon_optical_view", "tag_pon_optical_view", "type_first_request"),
+            ("pon_optical", "tag_pon_optical_data", "type_main_request"),
         ):
             tag = paths.get(key)
             if not tag:
