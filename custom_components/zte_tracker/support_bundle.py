@@ -31,7 +31,6 @@ FIXED_PROBES: dict[str, tuple[str, str]] = {
     "lan_view": ("menuView", "localNetStatus"),
 }
 
-
 # Node names the parsers already understand.
 KNOWN_NODES = frozenset(
     {
@@ -44,6 +43,9 @@ KNOWN_NODES = frozenset(
         "OBJ_POWERONTIME_ID",  # get_router_details
         "OBJ_WLANAP_ID",  # parse_devices, ESSID mapping
         "ID_WAN_COMFIG",  # get_wan_status
+        "OBJ_PON_OPTICALPARA_ID",  # get_pon_optical_info
+        "OBJ_LOS_INFO_ID",  # get_pon_optical_info
+        "OBJ_GPONREGSTATUS_ID",  # get_pon_optical_info
     }
 )
 
@@ -384,6 +386,12 @@ def _probe_matrix(profiles: dict[str, dict[str, Any]]) -> dict[str, tuple[str, s
             # same view-then-data sequence for this reason.
             ("wan_view", "tag_wan_status_view", "type_first_request"),
             ("wan", "tag_wan_status_data", "type_main_request"),
+            # Same view-before-data requirement as wan_view/wan. Only models
+            # confirmed to be GPON ONTs define these tags (see F6600P in
+            # zte_client.py); paths.get() returns None for everyone else, so
+            # this loop simply skips them.
+            ("pon_optical_view", "tag_pon_optical_view", "type_first_request"),
+            ("pon_optical", "tag_pon_optical_data", "type_main_request"),
         ):
             tag = paths.get(key)
             if not tag:
