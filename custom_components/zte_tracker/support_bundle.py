@@ -42,7 +42,8 @@ KNOWN_NODES = frozenset(
         "OBJ_CPUMEMUSAGE_ID",  # get_router_details
         "OBJ_POWERONTIME_ID",  # get_router_details
         "OBJ_WLANAP_ID",  # parse_devices, ESSID mapping
-        "ID_WAN_COMFIG",  # get_wan_status
+        "ID_WAN_COMFIG",  # get_wan_status (Ethernet-style WAN models)
+        "OBJ_DSLINTERFACE_ID",  # get_wan_status, DSL branch (H2640)
         "OBJ_PON_OPTICALPARA_ID",  # get_pon_optical_info
         "OBJ_LOS_INFO_ID",  # get_pon_optical_info
         "OBJ_GPONREGSTATUS_ID",  # get_pon_optical_info
