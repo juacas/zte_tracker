@@ -46,6 +46,9 @@ KNOWN_NODES = frozenset(
         "OBJ_PON_OPTICALPARA_ID",  # get_pon_optical_info
         "OBJ_LOS_INFO_ID",  # get_pon_optical_info
         "OBJ_GPONREGSTATUS_ID",  # get_pon_optical_info
+        "OBJ_PON_CATV_ID",  # device_info, CATV RF overlay info, unparsed
+        "OBJ_PON_POWERONTIME_ID",  # device_info, PON module uptime, unparsed
+        "OBJ_SN_INFO_ID",  # device_info, serial number info, unparsed
     }
 )
 
@@ -257,15 +260,18 @@ def _base_tag(tag: str) -> str:
 _LUA_TAG = re.compile(r"(?:_lua\.lua|_lua|\.lua)$")
 
 
-def _discovered_request_type(tag: str) -> str:
-    """menuData for data endpoints, menuView for the plain-word menu pages.
+def _discovered_request_type(tag: str, paths: dict[str, Any] | None = None) -> str:
+    """The client's own view/data request types, when known; the old plain/`_lua` guess otherwise.
 
-    Every _lua-suffixed tag seen so far is a menuData endpoint; every plain
-    word (statusMgr, localNetStatus, ethWanStatus...) is a menuView page. A
-    tag guessed the wrong way still returns something (an error page, most
-    likely), which is why this is a heuristic and not asserted anywhere.
+    Every model's `paths` already states `type_first_request`/`type_main_request`
+    (e.g. E2631 uses `vueData` for both, not menuView/menuData). Falling back to
+    the guess only when `paths` is missing keeps this working for callers that
+    still pass a bare tag, and a wrong guess still just returns an error page.
     """
-    return "menuData" if _LUA_TAG.search(tag) else "menuView"
+    paths = paths or {}
+    if _LUA_TAG.search(tag):
+        return paths.get("type_main_request", "menuData")
+    return paths.get("type_first_request", "menuView")
 
 
 def _known_tags(profiles: dict[str, dict[str, Any]]) -> set[str]:
@@ -310,7 +316,7 @@ def _discover(
             truncated = True
             break
         tag = frontier.pop(0)
-        request_type = _discovered_request_type(tag)
+        request_type = _discovered_request_type(tag, getattr(client, "paths", None))
         url = (
             f"{client.base_url}/?_type={request_type}&_tag={tag}"
             f"&_={client.get_guid()}"

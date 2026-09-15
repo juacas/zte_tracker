@@ -441,6 +441,28 @@ class TestOpenIssues(BundleTest):
         # A discovered tag must never be mistaken for a profile.
         self.assertEqual(bundle["analysis"]["best_matching_profile"], "H288A")
 
+    def test_a_model_with_vuedata_request_types_is_discovered_correctly(self):
+        """E2631 (and its SR7xxx aliases) use vueData for both view and data
+        requests, not menuView/menuData. Before this, discovery always
+        guessed menuView/menuData regardless of the configured client, which
+        would have probed the wrong request type on a real E2631 router."""
+        router = _Router(
+            {
+                "OBJ_CLIENTS_ID": _Response(devices_xml(count=3)),
+                "localNetStatus": _Response(
+                    "<html>?_type=vueData&_tag=extra_page</html>",
+                    200,
+                    "text/html",
+                ),
+                "extra_page": _Response(devices_xml("OBJ_EXTRA_ID", 1)),
+            }
+        )
+        router.paths = {**PROFILES["E2631"]}
+        bundle = self.bundle(router)
+
+        probe = bundle["probes"]["discovered_extra_page"]
+        self.assertEqual(probe["type"], "vueData")
+
     def test_issue_13_nothing_matches_and_the_report_says_so(self):
         router = _Router({}, default=_Response(NOT_FOUND, 404))
         analysis = self.bundle(router)["analysis"]
