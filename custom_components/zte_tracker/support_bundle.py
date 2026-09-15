@@ -311,8 +311,15 @@ def _discover(
             break
         tag = frontier.pop(0)
         request_type = _discovered_request_type(tag)
-        url = f"{client.base_url}/?_type={request_type}&_tag={tag}" f"&_={client.get_guid()}"
-        entry: dict[str, Any] = {"type": request_type, "tag": tag, "source": "advertised"}
+        url = (
+            f"{client.base_url}/?_type={request_type}&_tag={tag}"
+            f"&_={client.get_guid()}"
+        )
+        entry: dict[str, Any] = {
+            "type": request_type,
+            "tag": tag,
+            "source": "advertised",
+        }
         entry.update(_fetch(client, url))
         discovered[f"discovered_{tag}"] = entry
 
