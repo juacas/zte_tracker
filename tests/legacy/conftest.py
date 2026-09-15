@@ -1,4 +1,5 @@
 """Common fixtures for ZTE Tracker tests."""
+import asyncio
 import pytest
 from unittest.mock import Mock
 
@@ -18,6 +19,10 @@ class MockHomeAssistant:
     async def async_add_executor_job(self, func, *args):
         """Mock executor job."""
         return func(*args) if callable(func) else func
+
+    def async_create_background_task(self, target, name=None, eager_start=True):
+        """Mimic hass.async_create_background_task: just schedule the coroutine."""
+        return asyncio.ensure_future(target)
 
 
 @pytest.fixture

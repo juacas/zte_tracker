@@ -20,32 +20,42 @@ PROFILES = {
     "F6640": {
         "wlan_script": "wlan_client_stat_lua.lua",
         "lan_script": "accessdev_landevs_lua.lua",
+        "tag_wan_status_view": "ethWanStatus",
         "tag_wan_status_data": "wan_internetstatus_lua.lua",
+        "type_first_request": "menuView",
         "type_main_request": "menuData",
     },
     "F8748": {
         "wlan_script": "wlan_client_stat_lua.lua",
         "lan_script": "accessdev_landevs_lua.lua",
+        "tag_wan_status_view": "ethWanStatus",
         "tag_wan_status_data": "wan_internetstatus_lua.lua",
+        "type_first_request": "menuView",
         "type_main_request": "menuData",
         "parse_wan_traffic": True,
     },
     "H288A": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
         "lan_script": "accessdev_landevs_lua.lua",
+        "tag_wan_status_view": "ethWanStatus",
         "tag_wan_status_data": "wan_internetstatus_lua.lua",
+        "type_first_request": "menuView",
         "type_main_request": "menuData",
     },
     "H388X": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
         "lan_script": "accessdev_landevs_lua.lua",
+        "tag_wan_status_view": "ethWanStatus",
         "tag_wan_status_data": "wan_internet_lua.lua",
+        "type_first_request": "menuView",
         "type_main_request": "menuData",
     },
     "E2631": {
         "wlan_script": "vue_client_data",
         "lan_script": "localnet_lan_info_lua",
+        "tag_wan_status_view": "vue_home_device_data_no_update_sess",
         "tag_wan_status_data": "vue_mainwan_data",
+        "type_first_request": "vueData",
         "type_main_request": "vueData",
     },
 }
@@ -281,6 +291,77 @@ class TestOpenIssues(BundleTest):
             "kind"
         ]
         self.assertEqual(kind, "redirect_or_refresh")
+
+    def test_discovery_follows_a_chain_of_advertised_pages(self):
+        """An endpoint discovered this round can itself advertise a further unknown one; the walk must not stop after a single hop."""
+        router = _Router(
+            {
+                "accessdev_ssiddev_lua.lua": _Response(devices_xml(count=3)),
+                "localNetStatus": _Response(
+                    "<html>?_type=menuData&_tag=first_hop_lua.lua</html>",
+                    200,
+                    "text/html",
+                ),
+                "first_hop_lua.lua": _Response(
+                    "<html>?_type=menuData&_tag=second_hop_lua.lua</html>",
+                    200,
+                    "text/html",
+                ),
+                "second_hop_lua.lua": _Response(devices_xml("OBJ_WANLAN_ID", 1)),
+            }
+        )
+        bundle = self.bundle(router)
+
+        self.assertIn("second_hop_lua.lua", bundle["advertised_endpoints"])
+        probe = bundle["probes"]["discovered_second_hop_lua.lua"]
+        self.assertEqual(probe["status"], 200)
+        self.assertEqual(probe["source"], "advertised")
+
+    def test_discovery_stops_at_the_probe_cap_even_across_many_hops(self):
+        """A chain longer than the cap must be truncated, not followed forever: the cap is a safety bound, not a single-hop limit."""
+        cap = self.module.MAX_DISCOVERED_PROBES
+        routes = {
+            "accessdev_ssiddev_lua.lua": _Response(devices_xml(count=3)),
+            "localNetStatus": _Response(
+                "<html>?_type=menuData&_tag=hop_0_lua.lua</html>", 200, "text/html"
+            ),
+        }
+        for i in range(cap + 3):
+            routes[f"hop_{i}_lua.lua"] = _Response(
+                f"<html>?_type=menuData&_tag=hop_{i + 1}_lua.lua</html>",
+                200,
+                "text/html",
+            )
+        bundle = self.bundle(_Router(routes))
+
+        self.assertTrue(bundle.get("discovery_truncated"))
+        discovered = [
+            key for key in bundle["probes"] if key.startswith("discovered_hop_")
+        ]
+        self.assertEqual(len(discovered), cap)
+        self.assertIn("advertised_endpoints_not_probed", bundle)
+
+    def test_wan_status_view_page_also_advertises_unknown_endpoints(self):
+        """The bundle probes each profile's WAN view page, not just the LAN one, so an unadvertised WAN endpoint can be discovered without any user-supplied XML."""
+        router = _Router(
+            {
+                "accessdev_ssiddev_lua.lua": _Response(devices_xml(count=3)),
+                "ethWanStatus": _Response(
+                    "<html>?_type=menuData&_tag=wan_ip_status_lua.lua</html>",
+                    200,
+                    "text/html",
+                ),
+                "wan_ip_status_lua.lua": _Response(
+                    devices_xml("OBJ_WANLAN_ID", 1)
+                ),
+            }
+        )
+        bundle = self.bundle(router)
+
+        self.assertIn("wan_ip_status_lua.lua", bundle["advertised_endpoints"])
+        probe = bundle["probes"]["discovered_wan_ip_status_lua.lua"]
+        self.assertEqual(probe["status"], 200)
+        self.assertEqual(probe["source"], "advertised")
 
     def test_issue_75_an_advertised_endpoint_is_discovered(self):
         """WAN status lives where no profile looks, but the router names it."""
