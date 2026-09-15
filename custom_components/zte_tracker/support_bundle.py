@@ -264,37 +264,52 @@ def _discover(
     bundle: dict[str, Any],
     deadline: float,
 ) -> None:
+    """Walk the advertised-tag graph breadth-first: a discovered page can itself advertise a further unknown one, so one page is never the end of the trail. Bounded by the same probe cap and deadline as everything else."""
     already = _known_tags(client.get_profiles())
     advertised: set[str] = set()
     for section in ("preauth", "probes"):
         for entry in bundle.get(section, {}).values():
             advertised.update(entry.get("advertised", []))
 
-    unknown = sorted(tag for tag in advertised if _base_tag(tag) not in already)
-    bundle["advertised_endpoints"] = sorted(advertised)[:MAX_ADVERTISED_TOTAL]
-    if len(advertised) > MAX_ADVERTISED_TOTAL:
-        bundle["advertised_endpoints_count"] = len(advertised)
-    if not unknown:
-        return
+    queued = {_base_tag(tag) for tag in advertised if _base_tag(tag) not in already}
+    frontier = sorted(tag for tag in advertised if _base_tag(tag) not in already)
 
     discovered: dict[str, Any] = {}
-    for tag in unknown[:MAX_DISCOVERED_PROBES]:
-        if time.monotonic() > deadline:
-            bundle["discovery_truncated"] = True
+    truncated = False
+    while frontier:
+        if len(discovered) >= MAX_DISCOVERED_PROBES:
+            truncated = True
             break
+        if time.monotonic() > deadline:
+            truncated = True
+            break
+        tag = frontier.pop(0)
         url = f"{client.base_url}/?_type=menuData&_tag={tag}" f"&_={client.get_guid()}"
         entry: dict[str, Any] = {"type": "menuData", "tag": tag, "source": "advertised"}
         entry.update(_fetch(client, url))
         discovered[f"discovered_{tag}"] = entry
 
-    if len(unknown) > MAX_DISCOVERED_PROBES:
-        bundle["advertised_endpoints_not_probed"] = unknown[
-            MAX_DISCOVERED_PROBES : MAX_DISCOVERED_PROBES
-            + MAX_ADVERTISED_LISTED_UNPROBED
+        for new_tag in entry.get("advertised", []):
+            advertised.add(new_tag)
+            base = _base_tag(new_tag)
+            if base in already or base in queued:
+                continue
+            queued.add(base)
+            frontier.append(new_tag)
+
+    bundle["advertised_endpoints"] = sorted(advertised)[:MAX_ADVERTISED_TOTAL]
+    if len(advertised) > MAX_ADVERTISED_TOTAL:
+        bundle["advertised_endpoints_count"] = len(advertised)
+
+    if truncated:
+        bundle["discovery_truncated"] = True
+    if frontier:
+        not_probed = sorted({_base_tag(tag) for tag in frontier})
+        bundle["advertised_endpoints_not_probed"] = not_probed[
+            :MAX_ADVERTISED_LISTED_UNPROBED
         ]
-        bundle["advertised_endpoints_not_probed_count"] = (
-            len(unknown) - MAX_DISCOVERED_PROBES
-        )
+        bundle["advertised_endpoints_not_probed_count"] = len(not_probed)
+
     bundle["probes"].update(discovered)
 
 
@@ -324,15 +339,16 @@ def _probe_matrix(profiles: dict[str, dict[str, Any]]) -> dict[str, tuple[str, s
     seen: set[tuple[str, str]] = set(probes.values())
 
     for profile_name, paths in profiles.items():
-        for label, key in (
-            ("lan", "lan_script"),
-            ("wlan", "wlan_script"),
-            ("wan", "tag_wan_status_data"),
+        for label, key, type_key in (
+            ("lan", "lan_script", "type_main_request"),
+            ("wlan", "wlan_script", "type_main_request"),
+            ("wan", "tag_wan_status_data", "type_main_request"),
+            ("wan_view", "tag_wan_status_view", "type_first_request"),
         ):
             tag = paths.get(key)
             if not tag:
                 continue
-            request_type = paths.get("type_main_request", "menuData")
+            request_type = paths.get(type_key, "menuData")
             if (request_type, tag) in seen:
                 continue
             seen.add((request_type, tag))
