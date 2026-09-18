@@ -226,3 +226,121 @@ class TestzteClient(TestCase):
         # DSL-only keys must never appear for a non-DSL profile.
         self.assertNotIn("DSL_upstream_rate_kbps", wan_attrs)
         self.assertNotIn("DSL_profile", wan_attrs)
+
+    # --- SessionTimeout recovery (#75: bundle showed every probe timing out) ---
+
+    def test_get_wan_status_retries_once_after_session_timeout(self):
+        """A stale session (e.g. evicted by a concurrent router login) fails the first WAN status fetch as SessionTimeout; get_wan_status must force a fresh login and retry once instead of giving up."""
+        client = zteClient(self.host, "admin", self.password, "F6640")
+        client.session = MagicMock()
+        client.login_data = {"login_need_refresh": 0}
+        client.login = MagicMock(return_value=True)
+        client.logout = MagicMock()
+
+        timeout_response = MagicMock()
+        timeout_response.raise_for_status = MagicMock()
+        timeout_response.text = "<ajax_response_xml_root><IF_ERRORSTR>SessionTimeout</IF_ERRORSTR></ajax_response_xml_root>"
+
+        ok_response = MagicMock()
+        ok_response.raise_for_status = MagicMock()
+        ok_response.text = """<ajax_response_xml_root>
+    <IF_ERRORSTR>SUCC</IF_ERRORSTR>
+    <ID_WAN_COMFIG>
+        <Instance>
+            <ParaName>WANCName</ParaName>
+            <ParaValue>WAN_internet</ParaValue>
+            <ParaName>ConnStatus</ParaName>
+            <ParaValue>Connected</ParaValue>
+        </Instance>
+    </ID_WAN_COMFIG>
+</ajax_response_xml_root>"""
+        view_response = MagicMock()
+        view_response.raise_for_status = MagicMock()
+        # view, data(timeout), view(retry), data(retry, ok)
+        client.session.get.side_effect = [
+            view_response,
+            timeout_response,
+            view_response,
+            ok_response,
+        ]
+
+        wan_attrs = client.get_wan_status()
+
+        client.logout.assert_called_once()
+        client.login.assert_called_once()
+        self.assertEqual(wan_attrs["WAN_connected"], True)
+        self.assertNotIn("WAN_status_error", wan_attrs)
+
+    def test_get_wan_status_reports_error_attribute_when_retry_also_fails(self):
+        """If the retry also fails, get_wan_status must not raise or silently return {}: the failure reason is surfaced as WAN_status_error so it's visible on the entity itself, without a separate log/bundle round-trip."""
+        client = zteClient(self.host, "admin", self.password, "F6640")
+        client.session = MagicMock()
+        client.login_data = {"login_need_refresh": 0}
+        client.login = MagicMock(return_value=True)
+        client.logout = MagicMock()
+
+        timeout_response = MagicMock()
+        timeout_response.raise_for_status = MagicMock()
+        timeout_response.text = "<ajax_response_xml_root><IF_ERRORSTR>SessionTimeout</IF_ERRORSTR></ajax_response_xml_root>"
+        view_response = MagicMock()
+        view_response.raise_for_status = MagicMock()
+        client.session.get.side_effect = [
+            view_response,
+            timeout_response,
+            view_response,
+            timeout_response,
+        ]
+
+        wan_attrs = client.get_wan_status()
+
+        self.assertIn("SessionTimeout", wan_attrs["WAN_status_error"])
+        self.assertNotIn("WAN_connected", wan_attrs)
+
+    def test_get_wan_status_reports_error_when_response_shape_is_unexpected(self):
+        """Router answers SUCC (no exception) but the configured root tag doesn't match anything in the XML, e.g. a wrong query string for this firmware. Must surface WAN_status_error instead of silently returning {} (#75's silent-failure symptom)."""
+        client = zteClient(self.host, "admin", self.password, "H2640")
+        client.session = MagicMock()
+        view_response = MagicMock()
+        view_response.raise_for_status = MagicMock()
+        data_response = MagicMock()
+        data_response.raise_for_status = MagicMock()
+        data_response.text = "<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>"
+        client.session.get.side_effect = [view_response, data_response]
+
+        wan_attrs = client.get_wan_status()
+
+        self.assertIn("WAN_status_error", wan_attrs)
+        self.assertIn("OBJ_DSLINTERFACE_ID", wan_attrs["WAN_status_error"])
+
+    def test_get_wan_status_lists_unmatched_field_names(self):
+        """DSL Instance node present but none of the mapped field names appear (a firmware variant with different names): the actual field names (never values) must be listed so a fix can be written without another raw capture."""
+        client = zteClient(self.host, "admin", self.password, "H2640")
+        client.session = MagicMock()
+        view_response = MagicMock()
+        view_response.raise_for_status = MagicMock()
+        data_response = MagicMock()
+        data_response.raise_for_status = MagicMock()
+        data_response.text = (
+            "<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR>"
+            "<OBJ_DSLINTERFACE_ID><Instance>"
+            "<ParaName>LineRate_Up</ParaName><ParaValue>16094</ParaValue>"
+            "</Instance></OBJ_DSLINTERFACE_ID></ajax_response_xml_root>"
+        )
+        client.session.get.side_effect = [view_response, data_response]
+
+        wan_attrs = client.get_wan_status()
+
+        self.assertIn("WAN_status_error", wan_attrs)
+        self.assertIn("LineRate_Up", wan_attrs["WAN_status_error"])
+
+    def test_get_wan_status_names_missing_endpoint_config_without_crashing(self):
+        """A model profile with the toggle on but no tag_wan_status_data configured must not raise a raw KeyError from inside the URL builder; it should name the actual problem."""
+        client = zteClient(self.host, "admin", self.password, "F6640")
+        client.paths = dict(client.paths)
+        del client.paths["tag_wan_status_data"]
+        client.session = MagicMock()
+
+        wan_attrs = client.get_wan_status()
+
+        self.assertIn("WAN_status_error", wan_attrs)
+        self.assertNotIn("tag_wan_status_data", wan_attrs["WAN_status_error"])

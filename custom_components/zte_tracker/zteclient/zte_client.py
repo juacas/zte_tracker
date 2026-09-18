@@ -23,6 +23,7 @@ from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
 
 from ..const import DEFAULT_QUERY_ROUTER_DETAILS, DEFAULT_QUERY_WAN_STATUS
+from ..support_shape import safe_name
 
 # Suppress InsecureRequestWarning only from urllib3 (not globally)
 warnings.filterwarnings(
@@ -116,6 +117,17 @@ _MODELS["F6600P"] = {
     "tag_pon_optical_view": "ponopticalinfo&Menu3Location=0",
     "tag_pon_optical_data": "optical_info_lua.lua",
 }
+
+
+def _field_names_seen(instances: list[ET.Element], limit: int = 20) -> str:
+    """Privacy-safe list of the ParaName values actually present across the given instances, never their values. Used only to describe a firmware/field mismatch (#75), so a fix can be written without asking for another raw capture."""
+    names = set()
+    for inst in instances:
+        for i in range(0, len(inst) // 2):
+            pname = inst[i * 2].text
+            if pname:
+                names.add(safe_name(pname))
+    return ", ".join(sorted(names)[:limit]) or "(none)"
 
 
 class zteClient:
@@ -740,31 +752,70 @@ class zteClient:
                     parsed[pname] = pvalue
         return parsed
 
+    def _fetch_wan_status_xml(self) -> ET.Element:
+        """One GET pair for the WAN status view+data. Raises on a router error string, including SessionTimeout, so the caller can decide whether to retry."""
+        url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
+        r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+        r.raise_for_status()
+        url = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
+        r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+        r.raise_for_status()
+        self.log_request(r)
+        xml = ET.fromstring(r.text)
+        error_str = xml.findtext("IF_ERRORSTR")
+        if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
+            raise Exception(f"Router error: {error_str}")
+        return xml
+
     def get_wan_status(self) -> dict[str, Any]:
         """Fetch WAN status and return relevant attributes."""
         if not getattr(self, "query_wan_status", True):
             _LOGGER.debug("WAN status query disabled by client flag")
             return {}
 
+        if not self.paths.get("tag_wan_status_view") or not self.paths.get(
+            "tag_wan_status_data"
+        ):
+            # A model profile with the toggle on but no WAN endpoints configured
+            # would otherwise KeyError inside _fetch_wan_status_xml, which is a
+            # confusing message on the sensor. Name the actual problem instead.
+            return {
+                "WAN_status_error": "This model's profile has no WAN status endpoint configured."
+            }
+
         wan_attrs = {}
         try:
-            # # Fetch MenuView first.
-            url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
-            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
-            r.raise_for_status()
-            # Fetch MenuData.
-            url = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
-            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
-            r.raise_for_status()
-            self.log_request(r)
-            xml = ET.fromstring(r.text)
+            try:
+                xml = self._fetch_wan_status_xml()
+            except Exception as ex:
+                # A stale session (e.g. the router evicted us for a concurrent
+                # login elsewhere) fails as SessionTimeout, not as an HTTP
+                # error, so raise_for_status() never sees it. Force a fresh
+                # login and retry exactly once rather than reporting nothing (#75).
+                if "SessionTimeout" not in str(ex):
+                    raise
+                _LOGGER.debug("WAN status hit SessionTimeout; forcing re-login and retrying once")
+                self.logout()
+                if not self.login():
+                    raise
+                xml = self._fetch_wan_status_xml()
             wan_status_root = self.paths.get("wan_status_root", "ID_WAN_COMFIG")
             instances = xml.findall(f"{wan_status_root}/Instance")
-            # Check error in response.
-            error_str = xml.findtext("IF_ERRORSTR")
-            if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
-                _LOGGER.error("Router error: %s", error_str)
-                raise Exception(f"Router error: {error_str}")
+            if not instances:
+                # No exception was raised (router answered SUCC), but the
+                # expected root/Instance shape wasn't there either. Silently
+                # returning {} here is exactly what hid the #75 symptom: the
+                # entity showed no WAN/DSL attributes and no clue why. Naming
+                # the nodes actually present (never their values) is usually
+                # enough on its own to correct wan_status_root without asking
+                # for another capture.
+                seen_nodes = sorted({safe_name(child.tag) for child in xml})
+                wan_attrs["WAN_status_error"] = (
+                    f"Router response had no <{wan_status_root}/Instance> data; "
+                    "the WAN status query string may need adjusting for this firmware. "
+                    f"Nodes actually present: {', '.join(seen_nodes) or '(none)'}."
+                )
+                return wan_attrs
 
             if self.paths.get("wan_status_kind") == "dsl":
                 # DSL sync status, kept separate from WAN_connected (Internet reachability).
@@ -791,6 +842,16 @@ class zteClient:
                                 wan_attrs[key] = caster(pvalue)
                             except (TypeError, ValueError):
                                 pass
+                if not wan_attrs:
+                    # Instance node existed but none of our known field names matched: a
+                    # firmware variant using different names, not a connection problem.
+                    # The field names themselves (never their values) tell us exactly
+                    # what to add, without asking for another raw capture.
+                    wan_attrs["WAN_status_error"] = (
+                        "DSL response had an Instance node but none of the known field "
+                        "names; this firmware variant may use different names. "
+                        f"Fields seen: {_field_names_seen(instances)}."
+                    )
                 return wan_attrs
 
             wan_node = None
@@ -849,8 +910,19 @@ class zteClient:
                             and pv.strip().lstrip("-").isdigit()
                         ):
                             wan_attrs[traffic_map[pn]] = int(pv)
+            if not wan_attrs:
+                # Instance node existed but none of our known field names matched: a
+                # firmware variant using different names, not a connection problem.
+                wan_attrs["WAN_status_error"] = (
+                    "WAN response had an Instance node but none of the known field "
+                    "names; this firmware variant may use different names. "
+                    f"Fields seen: {_field_names_seen(instances)}."
+                )
         except Exception as ex:
             _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
+            # Surfaced as a sensor attribute (not just the HA log) so a failure is
+            # self-diagnosing without a separate export_support_bundle round-trip (#75).
+            wan_attrs["WAN_status_error"] = str(ex)
         # model-gated no-op elsewhere; see get_pon_optical_info().
         wan_attrs.update(self.get_pon_optical_info())
         return wan_attrs
