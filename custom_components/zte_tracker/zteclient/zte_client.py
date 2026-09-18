@@ -23,7 +23,6 @@ from urllib3.exceptions import InsecureRequestWarning
 from urllib3.util.retry import Retry
 
 from ..const import DEFAULT_QUERY_ROUTER_DETAILS, DEFAULT_QUERY_WAN_STATUS
-from ..support_shape import safe_name
 
 # Suppress InsecureRequestWarning only from urllib3 (not globally)
 warnings.filterwarnings(
@@ -121,6 +120,10 @@ _MODELS["F6600P"] = {
 
 def _field_names_seen(instances: list[ET.Element], limit: int = 20) -> str:
     """Privacy-safe list of the ParaName values actually present across the given instances, never their values. Used only to describe a firmware/field mismatch (#75), so a fix can be written without asking for another raw capture."""
+    # Deferred: a module-level import here breaks test_router_details_parsing's
+    # stub-package loader, which never registers a support_shape stub.
+    from ..support_shape import safe_name
+
     names = set()
     for inst in instances:
         for i in range(0, len(inst) // 2):
@@ -809,6 +812,8 @@ class zteClient:
                 # the nodes actually present (never their values) is usually
                 # enough on its own to correct wan_status_root without asking
                 # for another capture.
+                from ..support_shape import safe_name  # deferred, see _field_names_seen
+
                 seen_nodes = sorted({safe_name(child.tag) for child in xml})
                 wan_attrs["WAN_status_error"] = (
                     f"Router response had no <{wan_status_root}/Instance> data; "
