@@ -756,10 +756,18 @@ class zteClient:
         return parsed
 
     def _fetch_wan_status_xml(self) -> ET.Element:
-        """One GET pair for the WAN status view+data. Raises on a router error string, including SessionTimeout, so the caller can decide whether to retry."""
-        url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
-        r = self.session.get(url, verify=self.verify_ssl, timeout=10)
-        r.raise_for_status()
+        """One GET pair for the WAN status view+data. Raises on a router error string, including SessionTimeout, so the caller can decide whether to retry.
+
+        DSL-kind models skip the view GET: it reuses the inherited Ethernet
+        tag_wan_status_view ("ethWanStatus..."), which is not a real page on a
+        DSL-only device, and issue #75 showed the router answering the
+        following data GET with SessionTimeout only when that mismatched view
+        request precedes it (the same data tag returns SUCC when hit directly).
+        """
+        if self.paths.get("wan_status_kind") != "dsl":
+            url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
         url = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
         r = self.session.get(url, verify=self.verify_ssl, timeout=10)
         r.raise_for_status()

@@ -126,10 +126,6 @@ class TestzteClient(TestCase):
         client = zteClient(self.host, "admin", self.password, "H2640")
         client.session = MagicMock()
 
-        view_response = MagicMock()
-        view_response.raise_for_status = MagicMock()
-        client.session.get.return_value = view_response
-
         data_response = MagicMock()
         data_response.raise_for_status = MagicMock()
         data_response.text = """<ajax_response_xml_root>
@@ -170,10 +166,15 @@ class TestzteClient(TestCase):
         </Instance>
     </OBJ_DSLINTERFACE_ID>
 </ajax_response_xml_root>"""
-        client.session.get.side_effect = [view_response, data_response]
+        client.session.get.return_value = data_response
 
         wan_attrs = client.get_wan_status()
 
+        # #75: the inherited Ethernet tag_wan_status_view is not a real page on
+        # a DSL-only device; the router answered the data GET with
+        # SessionTimeout only when that mismatched view GET preceded it. DSL
+        # kind must skip it and hit the data tag directly (single GET).
+        client.session.get.assert_called_once()
         self.assertEqual(wan_attrs["DSL_line_status"], "Up")
         self.assertEqual(wan_attrs["DSL_upstream_rate_kbps"], 16094)
         self.assertEqual(wan_attrs["DSL_downstream_rate_kbps"], 40315)
@@ -300,12 +301,10 @@ class TestzteClient(TestCase):
         """Router answers SUCC (no exception) but the configured root tag doesn't match anything in the XML, e.g. a wrong query string for this firmware. Must surface WAN_status_error instead of silently returning {} (#75's silent-failure symptom)."""
         client = zteClient(self.host, "admin", self.password, "H2640")
         client.session = MagicMock()
-        view_response = MagicMock()
-        view_response.raise_for_status = MagicMock()
         data_response = MagicMock()
         data_response.raise_for_status = MagicMock()
         data_response.text = "<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR></ajax_response_xml_root>"
-        client.session.get.side_effect = [view_response, data_response]
+        client.session.get.return_value = data_response
 
         wan_attrs = client.get_wan_status()
 
@@ -316,8 +315,6 @@ class TestzteClient(TestCase):
         """DSL Instance node present but none of the mapped field names appear (a firmware variant with different names): the actual field names (never values) must be listed so a fix can be written without another raw capture."""
         client = zteClient(self.host, "admin", self.password, "H2640")
         client.session = MagicMock()
-        view_response = MagicMock()
-        view_response.raise_for_status = MagicMock()
         data_response = MagicMock()
         data_response.raise_for_status = MagicMock()
         data_response.text = (
@@ -326,7 +323,7 @@ class TestzteClient(TestCase):
             "<ParaName>LineRate_Up</ParaName><ParaValue>16094</ParaValue>"
             "</Instance></OBJ_DSLINTERFACE_ID></ajax_response_xml_root>"
         )
-        client.session.get.side_effect = [view_response, data_response]
+        client.session.get.return_value = data_response
 
         wan_attrs = client.get_wan_status()
 
