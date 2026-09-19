@@ -126,6 +126,9 @@ class TestzteClient(TestCase):
         client = zteClient(self.host, "admin", self.password, "H2640")
         client.session = MagicMock()
 
+        view_response = MagicMock()
+        view_response.raise_for_status = MagicMock()
+
         data_response = MagicMock()
         data_response.raise_for_status = MagicMock()
         data_response.text = """<ajax_response_xml_root>
@@ -166,15 +169,23 @@ class TestzteClient(TestCase):
         </Instance>
     </OBJ_DSLINTERFACE_ID>
 </ajax_response_xml_root>"""
-        client.session.get.return_value = data_response
+        client.session.get.side_effect = [view_response, data_response]
 
         wan_attrs = client.get_wan_status()
 
-        # #75: the inherited Ethernet tag_wan_status_view is not a real page on
-        # a DSL-only device; the router answered the data GET with
-        # SessionTimeout only when that mismatched view GET preceded it. DSL
-        # kind must skip it and hit the data tag directly (single GET).
-        client.session.get.assert_called_once()
+        # #75 root cause (found after 8490b0e's skip-the-view fix still failed):
+        # the router only answers a menuData tag with SUCC if a prior menuView
+        # request in the same session advertised that exact tag; H2640 needs
+        # its OWN view tag (dslWanStatus), not to skip the view step. Assert
+        # the exact two bare URLs (no inherited Ethernet TypeUplink/pageType
+        # suffix, matching the reporter's own browser capture) in order.
+        self.assertEqual(client.session.get.call_count, 2)
+        view_url = client.session.get.call_args_list[0].args[0]
+        data_url = client.session.get.call_args_list[1].args[0]
+        self.assertIn("_type=menuView&_tag=dslWanStatus", view_url)
+        self.assertIn("_type=menuData&_tag=dsl_interface_status_lua.lua", data_url)
+        self.assertNotIn("TypeUplink", data_url)
+        self.assertNotIn("pageType", data_url)
         self.assertEqual(wan_attrs["DSL_line_status"], "Up")
         self.assertEqual(wan_attrs["DSL_upstream_rate_kbps"], 16094)
         self.assertEqual(wan_attrs["DSL_downstream_rate_kbps"], 40315)

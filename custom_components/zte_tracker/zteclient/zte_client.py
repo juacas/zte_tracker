@@ -96,7 +96,8 @@ _MODELS["F680"] = _MODELS["F6640"]
 _MODELS["H2640"] = {
     **_MODELS["H288A"],
     "reboot_check_encrypted": False,
-    "tag_wan_status_data": "dsl_interface_status_lua.lua&TypeUplink=2&pageType=1",
+    "tag_wan_status_view": "dslWanStatus",
+    "tag_wan_status_data": "dsl_interface_status_lua.lua",
     "wan_status_root": "OBJ_DSLINTERFACE_ID",
     "wan_status_kind": "dsl",
 }
@@ -758,24 +759,49 @@ class zteClient:
     def _fetch_wan_status_xml(self) -> ET.Element:
         """One GET pair for the WAN status view+data. Raises on a router error string, including SessionTimeout, so the caller can decide whether to retry.
 
-        DSL-kind models skip the view GET: it reuses the inherited Ethernet
-        tag_wan_status_view ("ethWanStatus..."), which is not a real page on a
-        DSL-only device, and issue #75 showed the router answering the
-        following data GET with SessionTimeout only when that mismatched view
-        request precedes it (the same data tag returns SUCC when hit directly).
+        The router only answers a menuData tag with SUCC if a prior menuView
+        request in the same session "advertised" that exact tag (verified
+        against issue #75's support bundle across many unrelated tags); every
+        other fetch in this file (get_lan_devices, get_router_details,
+        _fetch_topology_inline, get_pon_optical_info) follows this same
+        view-then-data pairing, so WAN status must too, using each model's own
+        tag_wan_status_view (H2640's dslWanStatus, not the inherited Ethernet
+        one).
         """
-        if self.paths.get("wan_status_kind") != "dsl":
-            url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
+        url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
+        try:
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            self.log_request(r)
             r.raise_for_status()
+        except Exception as ex:
+            # Names which of the two requests failed (#75: a repeat report
+            # needs this to tell a dead view page apart from a bad data tag).
+            # Wraps the GET itself too, not just raise_for_status: a
+            # connection/timeout error must be tagged the same way. Logged
+            # before raise_for_status so the status code/headers are visible
+            # even on an HTTP error, not just on success (#75: this was the
+            # only WAN status request never logged, hiding whether Referer/
+            # X-Requested-With were actually sent).
+            raise Exception(f"WAN status view GET failed: {ex}") from ex
         url = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
-        r = self.session.get(url, verify=self.verify_ssl, timeout=10)
-        r.raise_for_status()
-        self.log_request(r)
-        xml = ET.fromstring(r.text)
+        try:
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            self.log_request(r)
+            r.raise_for_status()
+        except Exception as ex:
+            raise Exception(f"WAN status data GET failed: {ex}") from ex
+        try:
+            xml = ET.fromstring(r.text)
+        except ET.ParseError as ex:
+            # A 200 OK with an HTML error page instead of the expected XML
+            # would otherwise surface as a cryptic ParseError (#75).
+            raise Exception(
+                f"WAN status data GET returned unparseable response: {ex}"
+            ) from ex
         error_str = xml.findtext("IF_ERRORSTR")
+        _LOGGER.debug("WAN status data GET IF_ERRORSTR: %s", error_str)
         if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
-            raise Exception(f"Router error: {error_str}")
+            raise Exception(f"WAN status data GET router error: {error_str}")
         return xml
 
     def get_wan_status(self) -> dict[str, Any]:
@@ -795,6 +821,13 @@ class zteClient:
             }
 
         wan_attrs = {}
+        _LOGGER.debug(
+            "WAN status starting: model=%s status=%s mesh_topology=%s scheme=%s",
+            self.model,
+            self.status,
+            self.mesh_topology,
+            self.scheme,
+        )
         try:
             try:
                 xml = self._fetch_wan_status_xml()
@@ -807,9 +840,22 @@ class zteClient:
                     raise
                 _LOGGER.debug("WAN status hit SessionTimeout; forcing re-login and retrying once")
                 self.logout()
-                if not self.login():
-                    raise
-                xml = self._fetch_wan_status_xml()
+                login_ok = self.login()
+                _LOGGER.debug("WAN status retry: re-login result=%s", login_ok)
+                if not login_ok:
+                    # Distinct from the fetch failing again: names the actual
+                    # blocker instead of repeating the pre-retry message (#75).
+                    raise Exception(
+                        f"WAN status retry: re-login failed after {ex}"
+                    ) from ex
+                try:
+                    xml = self._fetch_wan_status_xml()
+                except Exception as retry_ex:
+                    # Marks this as the post-retry failure, not the first
+                    # attempt, so the two aren't mistaken for each other (#75).
+                    raise Exception(
+                        f"WAN status retry also failed: {retry_ex}"
+                    ) from retry_ex
             wan_status_root = self.paths.get("wan_status_root", "ID_WAN_COMFIG")
             instances = xml.findall(f"{wan_status_root}/Instance")
             if not instances:
@@ -935,7 +981,12 @@ class zteClient:
             _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
             # Surfaced as a sensor attribute (not just the HA log) so a failure is
             # self-diagnosing without a separate export_support_bundle round-trip (#75).
-            wan_attrs["WAN_status_error"] = str(ex)
+            # Includes scheme/tags used so a repeat failure names the actual request,
+            # not just the router's generic error string.
+            wan_attrs["WAN_status_error"] = (
+                f"{ex} (scheme={self.scheme}, view_tag={self.paths.get('tag_wan_status_view')}, "
+                f"data_tag={self.paths.get('tag_wan_status_data')})"
+            )
         # model-gated no-op elsewhere; see get_pon_optical_info().
         wan_attrs.update(self.get_pon_optical_info())
         return wan_attrs
