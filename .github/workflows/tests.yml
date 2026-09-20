@@ -23,7 +23,7 @@ jobs:
         run: python -m unittest test_support_bundle test_service_layer test_diagnostics
 
       - working-directory: tests/zteclient
-        run: python -m unittest test_router_details_parsing
+        run: python -m unittest test_router_details_parsing test_wan_status
 
       # The property: no value from a router appears in its own description.
       - working-directory: tests
