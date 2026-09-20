@@ -92,9 +92,14 @@ _MODELS["SR7110"] = _MODELS["E2631"]
 _MODELS["F680"] = _MODELS["F6640"]
 # ZTE H2640: shares H288A's endpoints but the router verifies an
 # unencrypted SHA256 hex digest in the reboot Check header, not RSA-encrypted.
+# Also a VDSL/ADSL modem: WAN status via dsl_interface_status_lua.lua.
 _MODELS["H2640"] = {
     **_MODELS["H288A"],
     "reboot_check_encrypted": False,
+    "tag_wan_status_view": "dslWanStatus",
+    "tag_wan_status_data": "dsl_interface_status_lua.lua",
+    "wan_status_root": "OBJ_DSLINTERFACE_ID",
+    "wan_status_kind": "dsl",
 }
 # ZTE F8748 (GPON ONT) - DIGI Portugal ISP unit, firmware V3.0.10P2N4.
 # Defined as a distinct model (not a plain F6640 alias): it shares the F6640
@@ -736,6 +741,21 @@ class zteClient:
                     parsed[pname] = pvalue
         return parsed
 
+    def _fetch_wan_status_xml(self) -> ET.Element:
+        """GET the model's WAN status view, then its data page: the router only answers a data tag advertised by a preceding view request in the same session (#75)."""
+        url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
+        r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+        r.raise_for_status()
+        url = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
+        r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+        r.raise_for_status()
+        self.log_request(r)
+        xml = ET.fromstring(r.text)
+        error_str = xml.findtext("IF_ERRORSTR")
+        if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
+            raise Exception(f"Router error: {error_str}")
+        return xml
+
     def get_wan_status(self) -> dict[str, Any]:
         """Fetch WAN status and return relevant attributes."""
         if not getattr(self, "query_wan_status", True):
@@ -744,22 +764,52 @@ class zteClient:
 
         wan_attrs = {}
         try:
-            # # Fetch MenuView first.
-            url = f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
-            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
-            r.raise_for_status()
-            # Fetch MenuData.
-            url = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['tag_wan_status_data']}&_={self.get_guid()}"
-            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
-            r.raise_for_status()
-            self.log_request(r)
-            xml = ET.fromstring(r.text)
-            instances = xml.findall("ID_WAN_COMFIG/Instance")
-            # Check error in response.
-            error_str = xml.findtext("IF_ERRORSTR")
-            if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
-                _LOGGER.error("Router error: %s", error_str)
-                raise Exception(f"Router error: {error_str}")
+            try:
+                xml = self._fetch_wan_status_xml()
+            except Exception as ex:
+                # An evicted session fails as a SessionTimeout router error, not as an HTTP error, so re-login and retry once (#75).
+                if "SessionTimeout" not in str(ex):
+                    raise
+                self.logout()
+                if not self.login():
+                    raise
+                xml = self._fetch_wan_status_xml()
+            wan_status_root = self.paths.get("wan_status_root", "ID_WAN_COMFIG")
+            instances = xml.findall(f"{wan_status_root}/Instance")
+            if not instances:
+                # Router answered SUCC but with an unexpected shape: report it instead of returning {}, which is what hid #75 on the entity.
+                wan_attrs["WAN_status_error"] = (
+                    f"Router response had no <{wan_status_root}/Instance> data."
+                )
+                return wan_attrs
+
+            if self.paths.get("wan_status_kind") == "dsl":
+                # DSL sync status, kept separate from WAN_connected (Internet reachability).
+                dsl_map = {
+                    "Status": ("DSL_line_status", str),
+                    "Upstream_current_rate": ("DSL_upstream_rate_kbps", int),
+                    "Downstream_current_rate": ("DSL_downstream_rate_kbps", int),
+                    "Upstream_max_rate": ("DSL_upstream_max_rate_kbps", int),
+                    "Downstream_max_rate": ("DSL_downstream_max_rate_kbps", int),
+                    "Upstream_noise_margin": ("DSL_upstream_noise_margin", int),
+                    "Downstream_noise_margin": ("DSL_downstream_noise_margin", int),
+                    "Upstream_attenuation": ("DSL_upstream_attenuation", int),
+                    "Downstream_attenuation": ("DSL_downstream_attenuation", int),
+                    "CurrentProfile": ("DSL_profile", str),
+                    "tLinkEncapsulationUsed": ("DSL_encapsulation", str),
+                }
+                for inst in instances:
+                    for i in range(0, len(inst) // 2):
+                        pname = inst[i * 2].text
+                        pvalue = inst[i * 2 + 1].text
+                        if pname in dsl_map and pvalue is not None:
+                            key, caster = dsl_map[pname]
+                            try:
+                                wan_attrs[key] = caster(pvalue)
+                            except (TypeError, ValueError):
+                                pass
+                # DSL models expose no PON optics, so the shared tail below does not apply.
+                return wan_attrs
 
             wan_node = None
             for inst in instances:
@@ -819,6 +869,8 @@ class zteClient:
                             wan_attrs[traffic_map[pn]] = int(pv)
         except Exception as ex:
             _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
+            # Surfaced on the entity, not only in the log, so a failure is diagnosable without an export_support_bundle round-trip (#75).
+            wan_attrs["WAN_status_error"] = str(ex)
         # model-gated no-op elsewhere; see get_pon_optical_info().
         wan_attrs.update(self.get_pon_optical_info())
         return wan_attrs

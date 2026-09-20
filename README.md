@@ -71,6 +71,7 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
     - WAN_remain_leasetime
     - WAN_error_message
     - WAN_connected
+    - **DSL line** (VDSL/ADSL models such as the H2640): `DSL_line_status`, `DSL_upstream_rate_kbps`, `DSL_downstream_rate_kbps`, `DSL_upstream_max_rate_kbps`, `DSL_downstream_max_rate_kbps`, `DSL_upstream_noise_margin`, `DSL_downstream_noise_margin`, `DSL_upstream_attenuation`, `DSL_downstream_attenuation`, `DSL_profile`, `DSL_encapsulation`. Reported instead of the Ethernet WAN attributes, since DSL sync is not Internet reachability.
     - **Router details**: model, firmware version, uptime, MAC address, IP address, Memory usage, CPU usage, etc.
 
 - **Device Count Sensor** (`sensor.zte_router_[ip]_connected_devices`)
