@@ -72,7 +72,7 @@ jobs:
 
     steps:
       - name: Checkout repository (fetch tags)
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: ${{ inputs.tag_name || github.ref }}

@@ -72,7 +72,7 @@ jobs:
       pr_url: ${{ steps.pr.outputs.pr_url }}
     steps:
       - name: Checkout master
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@v5
         with:
           ref: master
           fetch-depth: 0
@@ -565,7 +565,7 @@ jobs:
       target_sha: ${{ steps.resolve.outputs.target_sha }}
     steps:
       - name: Checkout master
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@v5
         with:
           ref: master
           fetch-depth: 0
@@ -735,7 +735,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout target commit
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.resolve.outputs.target_sha }}
 
@@ -760,7 +760,7 @@ jobs:
           PY
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -801,7 +801,7 @@ jobs:
       tag_message: ${{ steps.changelog.outputs.tag_message }}
     steps:
       - name: Checkout target commit
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        uses: actions/checkout@v5
         with:
           ref: ${{ needs.resolve.outputs.target_sha }}
           fetch-depth: 0
