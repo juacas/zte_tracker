@@ -1,11 +1,29 @@
 name: Auto Release
 
 on:
+  # A push carrying a new manifest version releases it. That is how a hand bump works, and how a
+  # prepared release pull request continues once it is merged. A dispatch with auto_merge on, the
+  # default, finishes the job itself, because a merge made with GITHUB_TOKEN raises no push event.
   push:
     branches:
       - master
   workflow_dispatch:
     inputs:
+      bump:
+        description: "Version step. Auto infers it from the conventional commit subjects since the last stable tag, and falls back to patch."
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+      auto_merge:
+        description: "Merge the release pull request in this same run and publish immediately. Turn it off to review and merge that pull request yourself."
+        required: false
+        default: true
+        type: boolean
       mode:
         description: "Stable releases a new manifest version. RC creates vX.Y.(Z+1)-rc.N. Existing tags are never moved."
         required: true
@@ -15,10 +33,15 @@ on:
           - stable
           - rc
       dry_run:
-        description: "Validate and print the proposed operation. Does not create or repair tags or releases."
+        description: "Validate and print the proposed operation. Creates no branch, commit, pull request, merge, tag or release."
         required: false
         default: false
         type: boolean
+      release_notes:
+        description: "Optional free text placed above the generated entries in the changelog section and the release body."
+        required: false
+        default: ""
+        type: string
       target_sha:
         description: "Advanced recovery override. Must be an ancestor of master. Cannot release an unmerged hotfix branch or move an existing tag."
         required: false
@@ -33,9 +56,501 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    name: Prepare the release pull request
+    runs-on: ubuntu-latest
+    # Only a manual run prepares a bump. A push already carries one, and rc releases the tree as it stands.
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'stable'
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      should_prepare: ${{ steps.plan.outputs.should_prepare }}
+      next_version: ${{ steps.plan.outputs.next_version }}
+      bump: ${{ steps.plan.outputs.bump }}
+      merged_sha: ${{ steps.merge.outputs.merged_sha }}
+      pr_url: ${{ steps.pr.outputs.pr_url }}
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: master
+          fetch-depth: 0
+
+      # A run that dies at the merge with a raw API error is worse than one that never starts.
+      - name: Check the repository prerequisites
+        env:
+          AUTO_MERGE: ${{ inputs.auto_merge }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SETTING_PR='Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests.'
+          SETTING_ATTRIBUTION='Untick "Require extra approval for unattributed changes" in the master protection ruleset, under the Pull request rule.'
+
+          # GITHUB_TOKEN cannot be a ruleset bypass actor, by design, so the pull request is the only
+          # route to master. Its rules only have to allow an unattended merge when auto_merge is on:
+          # a human merge satisfies them by definition.
+          if [ "$AUTO_MERGE" != "true" ]; then
+            echo "auto_merge is off, so you merge the release pull request yourself and the branch rules are left to you."
+          elif rules_json=$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/master" 2>/dev/null); then
+            printf '%s' "$rules_json" > branch-rules.json
+            python3 - branch-rules.json "$SETTING_ATTRIBUTION" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          rules = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          setting = sys.argv[2]
+          problems = []
+          for rule in rules:
+              if rule.get("type") != "pull_request":
+                  continue
+              parameters = rule.get("parameters") or {}
+              if parameters.get("require_extra_approval_for_unattributed_changes"):
+                  problems.append(
+                      "The master ruleset requires an extra approval for unattributed changes, so the "
+                      "pipeline's own pull request would wait for a human forever.\n  " + setting
+                  )
+              count = parameters.get("required_approving_review_count") or 0
+              if count:
+                  problems.append(
+                      f"The master ruleset requires {count} approving review(s), which the pipeline cannot give itself.\n"
+                      "  Set the required approvals to 0, or merge the release pull request by hand."
+                  )
+              if parameters.get("required_review_thread_resolution"):
+                  problems.append("The master ruleset requires review thread resolution, which blocks an unattended merge.")
+          checks = [rule for rule in rules if rule.get("type") == "required_status_checks"]
+          if checks:
+              problems.append(
+                  "The master ruleset has required status checks. They must all pass before the pipeline can merge,\n"
+                  "  and repository auto-merge is disabled, so the merge would be refused."
+              )
+          if problems:
+              print("Cannot run an unattended release:", file=sys.stderr)
+              for problem in problems:
+                  print("- " + problem, file=sys.stderr)
+              raise SystemExit(1)
+          print("Branch ruleset allows the pipeline to merge its own pull request.")
+          PY
+          else
+            echo "Could not read the master branch rules. Continuing, and any rule that blocks the merge will be reported there."
+          fi
+
+          # Admin scope, which GITHUB_TOKEN does not have, so a failure here is not a verdict.
+          if permissions_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/permissions/workflow" 2>/dev/null); then
+            if [ "$(printf '%s' "$permissions_json" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin).get("can_approve_pull_request_reviews", True)))')" = "false" ]; then
+              echo "Actions is not allowed to create pull requests, and this pipeline needs to open one." >&2
+              echo "  $SETTING_PR" >&2
+              exit 1
+            fi
+            echo "Actions is allowed to create pull requests."
+          else
+            echo "Could not read the Actions workflow permissions, which needs admin scope. If the pull request cannot be opened:"
+            echo "  $SETTING_PR"
+          fi
+
+      - name: Plan the release
+        id: plan
+        env:
+          BUMP_INPUT: ${{ inputs.bump }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          case "$BUMP_INPUT" in
+            auto|patch|minor|major) ;;
+            *) echo "Unsupported bump: $BUMP_INPUT" >&2; exit 1 ;;
+          esac
+
+          git fetch --force --tags origin refs/heads/master:refs/remotes/origin/master
+          git checkout --detach refs/remotes/origin/master
+
+          MANIFEST_VERSION=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = Path("custom_components/zte_tracker/manifest.json")
+          print(json.loads(manifest.read_text(encoding="utf-8"))["version"])
+          PY
+          )
+          if [[ ! "$MANIFEST_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Malformed manifest version: $MANIFEST_VERSION" >&2
+            exit 1
+          fi
+
+          # Highest stable tag reachable from master, by version order: two tags can share a creation second.
+          LAST_STABLE_TAG=$(git for-each-ref --merged HEAD --format='%(refname:strip=2)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
+          if [ -n "$LAST_STABLE_TAG" ] && [ "$LAST_STABLE_TAG" != "$MANIFEST_VERSION" ]; then
+            echo "master already carries unreleased $MANIFEST_VERSION over tag $LAST_STABLE_TAG. Publishing that instead of bumping."
+            printf 'should_prepare=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -n "$LAST_STABLE_TAG" ]; then
+            RANGE="${LAST_STABLE_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          COMMIT_COUNT=$(git rev-list --count "$RANGE")
+          if [ "$COMMIT_COUNT" -eq 0 ]; then
+            echo "No commits since $LAST_STABLE_TAG. Nothing to release."
+            printf 'should_prepare=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git log --reverse --format='%H%x1f%s%x1f%b%x1e' "$RANGE" > release-commits.txt
+          BUMP=$BUMP_INPUT
+          if [ "$BUMP" = auto ]; then
+            BUMP=$(python3 - release-commits.txt <<'PY'
+          import re
+          from pathlib import Path
+
+          BREAKING_SUBJECT = re.compile(r"^[a-z]+(\(.+\))?!:")
+
+          bump = "patch"
+          for record in Path("release-commits.txt").read_text(encoding="utf-8").split("\x1e"):
+              if not record.strip():
+                  continue
+              fields = (record.strip("\n").split("\x1f") + ["", "", ""])[:3]
+              subject, body = fields[1], fields[2]
+              if BREAKING_SUBJECT.match(subject) or "BREAKING CHANGE" in body:
+                  bump = "major"
+                  break
+              # An unclassifiable subject counts as a patch. That is what the bump input is for.
+              if subject.startswith("feat") and bump == "patch":
+                  bump = "minor"
+          print(bump)
+          PY
+          )
+          fi
+
+          NEXT_VERSION=$(python3 - "$MANIFEST_VERSION" "$BUMP" <<'PY'
+          import sys
+
+          major, minor, patch = (int(part) for part in sys.argv[1].lstrip("v").split("."))
+          bump = sys.argv[2]
+          if bump == "major":
+              major, minor, patch = major + 1, 0, 0
+          elif bump == "minor":
+              minor, patch = minor + 1, 0
+          else:
+              patch += 1
+          print(f"v{major}.{minor}.{patch}")
+          PY
+          )
+
+          # Same commit to pull request mapping the changelog job uses, so both dialects stay identical.
+          entries=$(mktemp)
+          while IFS= read -r sha; do
+            for attempt in 1 2 3; do
+              if pulls_json=$(gh api -H "Accept: application/vnd.github+json" "repos/${GITHUB_REPOSITORY}/commits/${sha}/pulls"); then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "Unable to resolve PR metadata for $sha." >&2
+                exit 1
+              fi
+              sleep $((attempt * 3))
+            done
+            pulls_file=$(mktemp)
+            printf '%s' "$pulls_json" > "$pulls_file"
+            pr_line=$(python3 - "$pulls_file" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          pulls = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+
+
+          def rank(pull):
+              merged = pull.get("merged_at") is not None
+              to_master = (pull.get("base") or {}).get("ref") == "master"
+              return (merged and to_master, merged, pull.get("number") or 0)
+
+
+          if pulls:
+              best = sorted(pulls, key=rank, reverse=True)[0]
+              print(f"{best['title']}\t{best['number']}")
+          PY
+          )
+            if [ -n "$pr_line" ]; then
+              title=${pr_line%$'\t'*}
+              number=${pr_line##*$'\t'}
+              printf -- '- %s (#%s)\n' "$title" "$number" >> "$entries"
+            else
+              subject=$(git log -1 --pretty=%s "$sha")
+              short_sha=$(git rev-parse --short "$sha")
+              printf -- '- %s (%s)\n' "$subject" "$short_sha" >> "$entries"
+            fi
+          done < <(git rev-list --reverse "$RANGE")
+          if [ ! -s "$entries" ]; then
+            printf -- '- No changes since last release\n' > "$entries"
+          fi
+          cp "$entries" release-entries.md
+
+          {
+            printf 'Planned release: %s -> %s (%s bump over %s commit(s) in %s)\n' "$MANIFEST_VERSION" "$NEXT_VERSION" "$BUMP" "$COMMIT_COUNT" "$RANGE"
+            if [ -n "$RELEASE_NOTES" ]; then
+              printf '\n%s\n' "$RELEASE_NOTES"
+            fi
+            printf '\n'
+            cat release-entries.md
+          }
+          {
+            printf 'should_prepare=true\n'
+            printf 'next_version=%s\n' "$NEXT_VERSION"
+            printf 'bump=%s\n' "$BUMP"
+            printf 'base_version=%s\n' "$MANIFEST_VERSION"
+            printf 'commit_count=%s\n' "$COMMIT_COUNT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report the dry run plan
+        if: steps.plan.outputs.should_prepare == 'true' && inputs.dry_run
+        env:
+          BUMP: ${{ steps.plan.outputs.bump }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+        run: |
+          set -euo pipefail
+          echo "Dry run. No branch, commit, pull request, merge, tag or release was created."
+          echo "It would release ${NEXT_VERSION} as a ${BUMP} bump, with the entries printed above."
+
+      - name: Write the manifest and the changelog section
+        if: steps.plan.outputs.should_prepare == 'true' && !inputs.dry_run
+        env:
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          version = os.environ["NEXT_VERSION"]
+
+          manifest_path = Path("custom_components/zte_tracker/manifest.json")
+          raw = manifest_path.read_text(encoding="utf-8")
+          current = json.loads(raw)["version"]
+          # Rewrite the value in place so key order, indentation and spacing survive untouched.
+          needle = json.dumps("version") + ": " + json.dumps(current)
+          if raw.count(needle) != 1:
+              raise SystemExit(f"Cannot locate a unique version entry in {manifest_path}")
+          manifest_path.write_text(raw.replace(needle, json.dumps("version") + ": " + json.dumps(version), 1), encoding="utf-8")
+          if json.loads(manifest_path.read_text(encoding="utf-8"))["version"] != version:
+              raise SystemExit("Manifest rewrite did not take effect")
+
+          section = [f"## {version}", ""]
+          notes = os.environ.get("RELEASE_NOTES", "").strip()
+          if notes:
+              section += [notes, ""]
+          section += Path("release-entries.md").read_text(encoding="utf-8").strip("\n").splitlines() + [""]
+
+          changelog_path = Path("CHANGELOG.md")
+          lines = changelog_path.read_text(encoding="utf-8").splitlines()
+          # Drop any section for this version first, so a repeated run replaces it instead of stacking a second one.
+          kept, skipping = [], False
+          for line in lines:
+              if line.startswith("## "):
+                  skipping = line.strip() == f"## {version}"
+              if not skipping:
+                  kept.append(line)
+          insert_at = next((i for i, line in enumerate(kept) if line.startswith("## ")), len(kept))
+          kept[insert_at:insert_at] = section
+          changelog_path.write_text("\n".join(kept).rstrip("\n") + "\n", encoding="utf-8")
+          PY
+          git --no-pager diff --stat
+
+      - name: Open the release pull request
+        id: pr
+        if: steps.plan.outputs.should_prepare == 'true' && !inputs.dry_run
+        env:
+          AUTO_MERGE: ${{ inputs.auto_merge }}
+          GH_TOKEN: ${{ github.token }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/release-${NEXT_VERSION}-${GITHUB_RUN_ID}"
+          BASE_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
+
+          # Commits made through the Git Data API are attributed to the token identity, and a plain
+          # git push from the runner would also be refused: GITHUB_TOKEN cannot bypass the ruleset.
+          blob_sha() {
+            python3 - "$1" > blob-payload.json <<'PY'
+          import base64
+          import json
+          import sys
+          from pathlib import Path
+
+          print(json.dumps({"content": base64.b64encode(Path(sys.argv[1]).read_bytes()).decode("ascii"), "encoding": "base64"}))
+          PY
+            gh api "repos/${GITHUB_REPOSITORY}/git/blobs" --input blob-payload.json --jq .sha
+          }
+          MANIFEST_BLOB=$(blob_sha custom_components/zte_tracker/manifest.json)
+          CHANGELOG_BLOB=$(blob_sha CHANGELOG.md)
+
+          python3 - "$BASE_SHA" "$MANIFEST_BLOB" "$CHANGELOG_BLOB" > tree-payload.json <<'PY'
+          import json
+          import sys
+
+          base_sha, manifest_blob, changelog_blob = sys.argv[1:4]
+          print(json.dumps({
+              "base_tree": base_sha,
+              "tree": [
+                  {"path": "custom_components/zte_tracker/manifest.json", "mode": "100644", "type": "blob", "sha": manifest_blob},
+                  {"path": "CHANGELOG.md", "mode": "100644", "type": "blob", "sha": changelog_blob},
+              ],
+          }))
+          PY
+          TREE_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/git/trees" --input tree-payload.json --jq .sha)
+
+          python3 - "$BASE_SHA" "$TREE_SHA" > commit-payload.json <<'PY'
+          import json
+          import os
+          import sys
+
+          base_sha, tree_sha = sys.argv[1:3]
+          print(json.dumps({
+              "message": f"chore(release): prepare {os.environ['NEXT_VERSION']}",
+              "tree": tree_sha,
+              "parents": [base_sha],
+          }))
+          PY
+          COMMIT_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits" --input commit-payload.json --jq .sha)
+
+          python3 - "$BRANCH" "$COMMIT_SHA" > branch-payload.json <<'PY'
+          import json
+          import sys
+
+          branch, commit_sha = sys.argv[1:3]
+          print(json.dumps({"ref": f"refs/heads/{branch}", "sha": commit_sha}))
+          PY
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" --input branch-payload.json >/dev/null
+          echo "Created ${BRANCH} at ${COMMIT_SHA}."
+
+          python3 - "$BRANCH" > pr-payload.json <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          version = os.environ["NEXT_VERSION"]
+          entries = Path("release-entries.md").read_text(encoding="utf-8").strip("\n")
+          auto = os.environ.get("AUTO_MERGE") == "true"
+          tail = (
+              "This run merges this pull request itself, then tags and publishes."
+              if auto else
+              "Merging this pull request publishes " + version + ". Nothing else is needed."
+          )
+          print(json.dumps({
+              "title": f"chore(release): {version}",
+              "head": sys.argv[1],
+              "base": "master",
+              "body": f"Opened by Auto Release for {version}.\n\n{entries}\n\n{tail}\n",
+          }))
+          PY
+          if ! PR_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/pulls" --input pr-payload.json); then
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" >/dev/null 2>&1 || true
+            echo "Could not open the release pull request, so ${BRANCH} was removed." >&2
+            echo "Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests." >&2
+            exit 1
+          fi
+          PR_NUMBER=$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["number"])')
+          PR_URL=$(printf '%s' "$PR_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("html_url") or "")')
+          if [ -z "$PR_URL" ]; then
+            PR_URL="https://github.com/${GITHUB_REPOSITORY}/pull/${PR_NUMBER}"
+          fi
+          echo "Opened pull request #${PR_NUMBER}: ${PR_URL}"
+          {
+            printf 'branch=%s\n' "$BRANCH"
+            printf 'base_sha=%s\n' "$BASE_SHA"
+            printf 'pr_number=%s\n' "$PR_NUMBER"
+            printf 'pr_url=%s\n' "$PR_URL"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Hand the release pull request over for review
+        if: steps.pr.outputs.pr_number != '' && !inputs.auto_merge
+        env:
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+          # No waiting and no polling: merging is a push to master, which is already a trigger of this
+          # workflow, so the release continues in a fresh run instead of holding a runner open.
+          echo "Review and merge ${PR_URL} to publish ${NEXT_VERSION}."
+          echo "That merge pushes to master, which starts this workflow again and publishes the release."
+
+      - name: Merge the release pull request
+        id: merge
+        if: steps.pr.outputs.pr_number != '' && inputs.auto_merge
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+          cleanup_branch() {
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" >/dev/null 2>&1 || true
+          }
+
+          python3 - > merge-payload.json <<'PY'
+          import json
+          import os
+
+          version = os.environ["NEXT_VERSION"]
+          print(json.dumps({
+              "merge_method": "squash",
+              "commit_title": f"chore(release): prepare {version}",
+              "commit_message": "",
+          }))
+          PY
+          if ! merge_error=$(gh api -X PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/merge" --input merge-payload.json 2>&1 >/dev/null); then
+            printf '%s\n' "$merge_error" >&2
+            echo "Merging pull request #${PR_NUMBER} was refused, so nothing was tagged or released." >&2
+            case "$merge_error" in
+              *review*|*approv*|*"not mergeable"*|*405*)
+                echo "This is almost always the extra approval rule:" >&2
+                echo "  Untick \"Require extra approval for unattributed changes\" in the master protection ruleset, under the Pull request rule." >&2
+                echo "  Or re-run with auto_merge disabled and merge the pull request yourself." >&2
+                ;;
+            esac
+            # Deleting the branch closes the pull request too, so the next run starts from a clean master.
+            cleanup_branch
+            echo "Removed ${BRANCH} and closed #${PR_NUMBER}. master is untouched, so a retry is clean." >&2
+            exit 1
+          fi
+
+          # The merge API returns before the ref is guaranteed readable, and a tag on a stale master would ship the wrong tree.
+          MERGED_SHA=""
+          for attempt in 1 2 3 4 5 6; do
+            git fetch --force origin refs/heads/master:refs/remotes/origin/master
+            CANDIDATE=$(git rev-parse refs/remotes/origin/master)
+            if [ "$CANDIDATE" != "$BASE_SHA" ] && [ "$(git show "${CANDIDATE}:custom_components/zte_tracker/manifest.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$NEXT_VERSION" ]; then
+              MERGED_SHA=$CANDIDATE
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          if [ -z "$MERGED_SHA" ]; then
+            echo "master never showed ${NEXT_VERSION} after the merge, so nothing was tagged or released." >&2
+            echo "Check pull request #${PR_NUMBER} before re-running, the branch ${BRANCH} was left in place on purpose." >&2
+            exit 1
+          fi
+          cleanup_branch
+          echo "master is now ${MERGED_SHA} carrying ${NEXT_VERSION}."
+          printf 'merged_sha=%s\n' "$MERGED_SHA" >> "$GITHUB_OUTPUT"
+
   resolve:
     name: Resolve release target
     runs-on: ubuntu-latest
+    needs: prepare
+    # prepare is skipped on push and on rc, and a skipped need must not block the rest of the pipeline.
+    # With auto_merge off, prepare hands over to the human merge, whose push starts this workflow again.
+    if: >-
+      always() &&
+      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
+      !(github.event_name == 'workflow_dispatch' && inputs.auto_merge != true && needs.prepare.outputs.pr_url != '')
     permissions:
       contents: read
     outputs:
@@ -62,6 +577,7 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
           MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'stable' }}
           PUSH_SHA: ${{ github.sha }}
+          PREPARED_SHA: ${{ needs.prepare.outputs.merged_sha }}
           TARGET_SHA_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || '' }}
         run: |
           set -euo pipefail
@@ -83,6 +599,17 @@ jobs:
             fi
             TARGET_SHA=$(git rev-parse --verify --quiet "${TARGET_SHA_INPUT}^{commit}") || {
               echo "target_sha does not resolve to a commit." >&2
+              exit 1
+            }
+          elif [ -n "$PREPARED_SHA" ]; then
+            # The commit prepare just merged, so the release cannot drift onto a newer master.
+            for attempt in 1 2 3; do
+              git rev-parse --verify --quiet "${PREPARED_SHA}^{commit}" >/dev/null && break
+              sleep $((attempt * 5))
+              git fetch --force --tags origin refs/heads/master:refs/remotes/origin/master
+            done
+            TARGET_SHA=$(git rev-parse --verify --quiet "${PREPARED_SHA}^{commit}") || {
+              echo "The commit prepared by this run is not visible on master." >&2
               exit 1
             }
           elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
@@ -287,7 +814,8 @@ jobs:
           DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
         run: |
           set -euo pipefail
-          LAST_STABLE_TAG=$(git for-each-ref --merged HEAD --sort=-creatordate --format='%(refname:strip=2)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+          # Highest stable tag reachable, by version order: creation date ties can pick the wrong base.
+          LAST_STABLE_TAG=$(git for-each-ref --merged HEAD --format='%(refname:strip=2)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
           if [ -n "$LAST_STABLE_TAG" ]; then
             RANGE="${LAST_STABLE_TAG}..HEAD"
           else
