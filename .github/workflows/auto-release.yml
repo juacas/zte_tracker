@@ -1,0 +1,479 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Stable releases a new manifest version. RC creates vX.Y.(Z+1)-rc.N. Existing tags are never moved."
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - rc
+      dry_run:
+        description: "Validate and print the proposed operation. Does not create or repair tags or releases."
+        required: false
+        default: false
+        type: boolean
+      target_sha:
+        description: "Advanced recovery override. Must be an ancestor of master. Cannot release an unmerged hotfix branch or move an existing tag."
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: zte-release
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve release target
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+      changelog_version: ${{ steps.resolve.outputs.changelog_version }}
+      manifest_version: ${{ steps.resolve.outputs.manifest_version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      dry_run: ${{ steps.resolve.outputs.dry_run }}
+      should_tag: ${{ steps.resolve.outputs.should_tag }}
+      should_publish: ${{ steps.resolve.outputs.should_publish }}
+      tag_state: ${{ steps.resolve.outputs.tag_state }}
+      target_sha: ${{ steps.resolve.outputs.target_sha }}
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Resolve manifest version and tag state
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'stable' }}
+          PUSH_SHA: ${{ github.sha }}
+          TARGET_SHA_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || '' }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            stable|rc) ;;
+            *) echo "Unsupported release mode: $MODE" >&2; exit 1 ;;
+          esac
+          case "$DRY_RUN" in true|false) ;; *) echo "Invalid dry_run value: $DRY_RUN" >&2; exit 1 ;; esac
+
+          git fetch --force --tags origin refs/heads/master:refs/remotes/origin/master
+          # A draft release is invisible to HACS, so only a published one counts as released.
+          release_exists() {
+            [ "$(gh release view "$1" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" = "false" ]
+          }
+          if [ -n "$TARGET_SHA_INPUT" ]; then
+            if [[ ! "$TARGET_SHA_INPUT" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+              echo "target_sha must be a commit SHA." >&2
+              exit 1
+            fi
+            TARGET_SHA=$(git rev-parse --verify --quiet "${TARGET_SHA_INPUT}^{commit}") || {
+              echo "target_sha does not resolve to a commit." >&2
+              exit 1
+            }
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            TARGET_SHA=$PUSH_SHA
+          else
+            TARGET_SHA=$(git rev-parse refs/remotes/origin/master)
+          fi
+          TARGET_SHA=$(git rev-parse "$TARGET_SHA^{commit}")
+          if ! git merge-base --is-ancestor "$TARGET_SHA" refs/remotes/origin/master; then
+            echo "target_sha must be reachable from master." >&2
+            exit 1
+          fi
+          git checkout --detach "$TARGET_SHA"
+
+          MANIFEST_VERSION=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = Path("custom_components/zte_tracker/manifest.json")
+          print(json.loads(manifest.read_text(encoding="utf-8"))["version"])
+          PY
+          )
+          if [[ ! "$MANIFEST_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Malformed manifest version: $MANIFEST_VERSION" >&2
+            exit 1
+          fi
+
+          PRERELEASE=false
+          CHANGELOG_VERSION="$MANIFEST_VERSION"
+          if [ "$MODE" = "rc" ]; then
+            PRERELEASE=true
+            VERSION_BODY=${MANIFEST_VERSION#v}
+            IFS=. read -r MAJOR MINOR PATCH <<EOF_VERSION
+          $VERSION_BODY
+          EOF_VERSION
+            NEXT_PATCH=$((PATCH + 1))
+            CHANGELOG_VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            RC_PREFIX="${CHANGELOG_VERSION}-rc"
+            EXISTING_COUNT=$(git for-each-ref --format='%(refname:strip=2)' "refs/tags/${RC_PREFIX}.*" | grep -Ec "^${RC_PREFIX//./\\.}\\.[0-9]+$" || true)
+            LAST_RC_NUMBER=$(git for-each-ref --format='%(refname:strip=2)' "refs/tags/${RC_PREFIX}.*" | sed -nE "s/^${RC_PREFIX//./\\.}\\.([0-9]+)$/\\1/p" | sort -n | tail -n1)
+            TAG_NAME="${RC_PREFIX}.$((${LAST_RC_NUMBER:-0} + 1))"
+            # HACS only looks at the newest 30 releases, so a long rc run can bury the last stable one.
+            if [ "$EXISTING_COUNT" -ge 25 ]; then
+              echo "Refusing another RC: publish a stable release before approaching HACS's 30-release window." >&2
+              exit 1
+            fi
+          else
+            TAG_NAME="$MANIFEST_VERSION"
+          fi
+
+          # Gate every stable run, including a republish of an existing tag, or an older version can be made Latest.
+          if [ "$MODE" = "stable" ]; then
+            HIGHEST_STABLE=$(git tag --list | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vxF "$TAG_NAME" | sort -V | tail -n1 || true)
+            if [ -n "$HIGHEST_STABLE" ]; then
+              HIGHEST_OR_NEW=$(printf '%s\n%s\n' "$HIGHEST_STABLE" "$TAG_NAME" | sort -V | tail -n1)
+              if [ "$HIGHEST_OR_NEW" != "$TAG_NAME" ]; then
+                echo "Stable version $TAG_NAME must be newer than $HIGHEST_STABLE." >&2
+                exit 1
+              fi
+            fi
+          fi
+
+          if git rev-parse --verify --quiet "refs/tags/${TAG_NAME}" >/dev/null; then
+            SHOULD_TAG=false
+            TAG_COMMIT=$(git rev-list -n 1 "$TAG_NAME")
+            if [ "$TAG_COMMIT" = "$TARGET_SHA" ]; then
+              if release_exists "$TAG_NAME"; then
+                echo "Tag already points at this commit and its release is published, nothing to do."
+                SHOULD_PUBLISH=false
+                TAG_STATE=already-here
+              else
+                echo "Tag $TAG_NAME exists at this commit but no release was published. Resuming publication."
+                SHOULD_PUBLISH=true
+                TAG_STATE=orphan-tag
+              fi
+            elif git merge-base --is-ancestor "$TAG_COMMIT" "$TARGET_SHA"; then
+              if release_exists "$TAG_NAME"; then
+                echo "Version $TAG_NAME was already released at $TAG_COMMIT. Bump the manifest to release again."
+                SHOULD_PUBLISH=false
+                TAG_STATE=already-released
+              else
+                echo "Tag $TAG_NAME exists at $TAG_COMMIT but no release was published. Resuming publication."
+                SHOULD_PUBLISH=true
+                TAG_STATE=orphan-tag
+                # Validate and publish the tagged tree, not master's newer head.
+                TARGET_SHA="$TAG_COMMIT"
+                git checkout --detach "$TARGET_SHA"
+                TAG_MANIFEST=$(git show "${TARGET_SHA}:custom_components/zte_tracker/manifest.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+                # An rc tag name never equals the manifest version, so only stable can be checked this way.
+                if [ "$MODE" = "stable" ] && [ "$TAG_MANIFEST" != "$TAG_NAME" ]; then
+                  echo "Tag $TAG_NAME sits on a tree whose manifest says $TAG_MANIFEST. Refusing." >&2
+                  exit 1
+                fi
+              fi
+            else
+              echo "Tag $TAG_NAME points at $TAG_COMMIT, which is not an ancestor of $TARGET_SHA" >&2
+              exit 1
+            fi
+          else
+            SHOULD_TAG=true
+            SHOULD_PUBLISH=true
+            TAG_STATE=missing
+          fi
+
+          {
+            printf 'tag_name=%s\n' "$TAG_NAME"
+            printf 'changelog_version=%s\n' "$CHANGELOG_VERSION"
+            printf 'manifest_version=%s\n' "$MANIFEST_VERSION"
+            printf 'prerelease=%s\n' "$PRERELEASE"
+            printf 'dry_run=%s\n' "$DRY_RUN"
+            printf 'should_tag=%s\n' "$SHOULD_TAG"
+            printf 'should_publish=%s\n' "$SHOULD_PUBLISH"
+            printf 'tag_state=%s\n' "$TAG_STATE"
+            printf 'target_sha=%s\n' "$TARGET_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: Validate release tree
+    runs-on: ubuntu-latest
+    needs: resolve
+    if: needs.resolve.outputs.should_publish == 'true' || needs.resolve.outputs.dry_run == 'true'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout target commit
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
+
+      - name: Require stable changelog section
+        if: needs.resolve.outputs.prerelease != 'true'
+        env:
+          VERSION: ${{ needs.resolve.outputs.manifest_version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          expected = f"## {os.environ['VERSION']}"
+          headings = {
+              line.strip()
+              for line in Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+              if line.startswith("## ")
+          }
+          if expected not in headings:
+              raise SystemExit(f"Missing CHANGELOG.md section: {expected}")
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt cryptography flake8==7.1.1 black==24.10.0
+          (cd tests && python -m unittest test_support_bundle test_service_layer test_diagnostics)
+          (cd tests/zteclient && python -m unittest test_router_details_parsing test_wan_status)
+          (cd tests && ZTE_FUZZ_ITERATIONS=50000 python -m unittest test_support_shape_fuzz)
+          modules=(
+            custom_components/zte_tracker/support_shape.py
+            custom_components/zte_tracker/support_bundle.py
+            custom_components/zte_tracker/diagnostics.py
+          )
+          flake8 "${modules[@]}"
+          black --check "${modules[@]}"
+
+      - name: Run hassfest
+        uses: home-assistant/actions/hassfest@58bff37c8947f690ace498be413a9b78d6f30f93 # master
+
+      - name: Run HACS validation
+        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
+        with:
+          category: "integration"
+
+  changelog:
+    name: Prepare changelog metadata
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - validate
+    if: needs.resolve.outputs.should_publish == 'true' || needs.resolve.outputs.dry_run == 'true'
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      tag_message: ${{ steps.changelog.outputs.tag_message }}
+    steps:
+      - name: Checkout target commit
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
+          fetch-depth: 0
+
+      - name: Build changelog entries
+        id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGELOG_VERSION: ${{ needs.resolve.outputs.changelog_version }}
+          DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          LAST_STABLE_TAG=$(git for-each-ref --merged HEAD --sort=-creatordate --format='%(refname:strip=2)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+          if [ -n "$LAST_STABLE_TAG" ]; then
+            RANGE="${LAST_STABLE_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          entries=$(mktemp)
+          while IFS= read -r sha; do
+            for attempt in 1 2 3; do
+              if pulls_json=$(gh api -H "Accept: application/vnd.github+json" "repos/${GITHUB_REPOSITORY}/commits/${sha}/pulls"); then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "Unable to resolve PR metadata for $sha." >&2
+                exit 1
+              fi
+              sleep $((attempt * 3))
+            done
+            pulls_file=$(mktemp)
+            printf '%s' "$pulls_json" > "$pulls_file"
+            pr_line=$(python3 - "$pulls_file" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          pulls = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+
+
+          def rank(pull):
+              merged = pull.get("merged_at") is not None
+              to_master = (pull.get("base") or {}).get("ref") == "master"
+              return (merged and to_master, merged, pull.get("number") or 0)
+
+
+          if pulls:
+              best = sorted(pulls, key=rank, reverse=True)[0]
+              print(f"{best['title']}\t{best['number']}")
+          PY
+          )
+            if [ -n "$pr_line" ]; then
+              title=${pr_line%$'\t'*}
+              number=${pr_line##*$'\t'}
+              printf -- '- %s (#%s)\n' "$title" "$number" >> "$entries"
+            else
+              subject=$(git log -1 --pretty=%s "$sha")
+              short_sha=$(git rev-parse --short "$sha")
+              printf -- '- %s (%s)\n' "$subject" "$short_sha" >> "$entries"
+            fi
+          done < <(git rev-list --reverse "$RANGE")
+
+          if [ ! -s "$entries" ]; then
+            printf -- '- No changes since last release\n' > "$entries"
+          fi
+
+          python3 - "$entries" <<'PY' >> "$GITHUB_OUTPUT"
+          import sys
+          import uuid
+          from pathlib import Path
+
+          entries = [line.removeprefix("- ").strip() for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()]
+          visible = entries[:3]
+          extra = len(entries) - len(visible)
+          message = "; ".join(visible)
+          if extra:
+              message = f"{message}; and {extra} more"
+          delimiter = f"EOF_TAG_MESSAGE_{uuid.uuid4().hex}"
+          print(f"tag_message<<{delimiter}")
+          print(message)
+          print(delimiter)
+          PY
+
+  dry-run:
+    name: Report dry run
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - changelog
+    if: needs.resolve.outputs.dry_run == 'true'
+    permissions:
+      contents: read
+    steps:
+      - name: Print dry run result
+        env:
+          CHANGELOG_VERSION: ${{ needs.resolve.outputs.changelog_version }}
+          MANIFEST_VERSION: ${{ needs.resolve.outputs.manifest_version }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          SHOULD_PUBLISH: ${{ needs.resolve.outputs.should_publish }}
+          SHOULD_TAG: ${{ needs.resolve.outputs.should_tag }}
+          TAG_MESSAGE: ${{ needs.changelog.outputs.tag_message }}
+          TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
+          TAG_STATE: ${{ needs.resolve.outputs.tag_state }}
+          TARGET_SHA: ${{ needs.resolve.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          make_latest=true
+          if [ "$PRERELEASE" = "true" ]; then
+            make_latest=false
+          fi
+          {
+            printf 'Dry run only. No tag, release, asset, or repository write was created.\n'
+            printf 'target_sha=%s\n' "$TARGET_SHA"
+            printf 'manifest_version=%s\n' "$MANIFEST_VERSION"
+            printf 'changelog_version=%s\n' "$CHANGELOG_VERSION"
+            printf 'tag_name=%s\n' "$TAG_NAME"
+            printf 'tag_state=%s\n' "$TAG_STATE"
+            printf 'should_tag=%s\n' "$SHOULD_TAG"
+            printf 'should_publish=%s\n' "$SHOULD_PUBLISH"
+            printf 'prerelease=%s\n' "$PRERELEASE"
+            printf 'draft=false\n'
+            printf 'release_name=ZTE_TRACKER_%s\n' "$TAG_NAME"
+            printf 'make_latest=%s\n' "$make_latest"
+            printf 'tag_message=%s\n' "$TAG_MESSAGE"
+          }
+
+  tag:
+    name: Create annotated tag
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - changelog
+    if: needs.resolve.outputs.should_tag == 'true' && needs.resolve.outputs.dry_run != 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Create annotated tag object and ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
+          TAG_MESSAGE: ${{ needs.changelog.outputs.tag_message }}
+          TARGET_SHA: ${{ needs.resolve.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          # A revert stays an ancestor of master, so ancestry alone cannot catch a superseded target.
+          CURRENT_MASTER=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
+          if [ "$CURRENT_MASTER" != "$TARGET_SHA" ]; then
+            echo "Refusing to tag stale target $TARGET_SHA; master is now $CURRENT_MASTER." >&2
+            echo "The queued workflow for the newer master commit will handle the release." >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = {
+              "tag": os.environ["TAG_NAME"],
+              "message": os.environ["TAG_MESSAGE"],
+              "object": os.environ["TARGET_SHA"],
+              "type": "commit",
+          }
+          Path("tag-payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
+          tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/tags" --input tag-payload.json --jq .sha)
+          python3 - "$tag_sha" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          payload = {
+              "ref": f"refs/tags/{os.environ['TAG_NAME']}",
+              "sha": sys.argv[1],
+          }
+          Path("ref-payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" --input ref-payload.json >/dev/null
+          echo "Created annotated tag."
+
+  publish:
+    name: Publish release
+    needs:
+      - resolve
+      - validate
+      - tag
+    # An orphaned tag has to reach publish with tag skipped, so this cannot be a plain needs chain.
+    if: >-
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.validate.result == 'success' &&
+      needs.resolve.outputs.should_publish == 'true' &&
+      needs.resolve.outputs.dry_run != 'true' &&
+      (needs.tag.result == 'success' ||
+       (needs.tag.result == 'skipped' && needs.resolve.outputs.should_tag != 'true'))
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag_name: ${{ needs.resolve.outputs.tag_name }}
+      prerelease: ${{ needs.resolve.outputs.prerelease == 'true' }}
