@@ -41,7 +41,8 @@ fi
 case "$dry_run:$publish_result" in
   true:*)      outcome="Dry run. Nothing was tagged, released or written." ;;
   *:success)   outcome="Released." ;;
-  *:skipped)   outcome="Nothing to publish. The version on master is already released." ;;
+  # publish also skips when an earlier job failed, so only resolve's verdict proves the version was already out.
+  *:skipped)   if [ "${SHOULD_PUBLISH:-}" = "false" ]; then outcome="Nothing to publish. The version on master is already released."; else outcome="The run stopped before publishing."; fi ;;
   *:failure)   outcome="The publish step failed. No release was produced." ;;
   *:cancelled) outcome="The run was cancelled." ;;
   *)           outcome="The run stopped before publishing." ;;

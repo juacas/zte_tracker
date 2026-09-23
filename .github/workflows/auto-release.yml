@@ -197,9 +197,12 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          BUMP_INPUT: ${{ inputs.bump }}
           DRY_RUN: ${{ inputs.dry_run || false }}
           MODE: ${{ inputs.mode || 'stable' }}
+          NOTES_WRITTEN: ${{ needs.prepare.outputs.should_prepare }}
           PREPARED_SHA: ${{ needs.prepare.outputs.merged_sha }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
           TARGET_SHA_INPUT: ${{ inputs.target_sha || '' }}
         run: .github/scripts/choose_the_release_target.sh
 
@@ -383,6 +386,7 @@ jobs:
           PR_URL: ${{ needs.prepare.outputs.pr_url }}
           PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
+          SHOULD_PUBLISH: ${{ needs.resolve.outputs.should_publish }}
           TAG_MESSAGE: ${{ needs.changelog.outputs.tag_message }}
           TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
           TARGET_SHA: ${{ needs.resolve.outputs.target_sha }}
