@@ -1,11 +1,12 @@
 name: Auto Release
+run-name: "${{ inputs.dry_run && 'DRY RUN' || 'Release' }} | ${{ inputs.mode }} ${{ inputs.bump }}${{ inputs.auto_merge && '' || ' | manual merge' }}${{ inputs.target_sha && format(' | from {0}', inputs.target_sha) || '' }}"
 
 on:
   # A release is never automatic: nothing here fires on a push. Someone has to start this workflow from the Actions tab.
   workflow_dispatch:
     inputs:
       bump:
-        description: "Version step: patch, minor, major, or auto to read it from the commit subjects."
+        description: "Version step. From 1.2.3: patch 1.2.4, minor 1.3.0, major 2.0.0. Auto reads the commit subjects."
         required: true
         default: patch
         type: choice
@@ -21,7 +22,7 @@ on:
         default: true
         type: boolean
       mode:
-        description: "Mode: stable bumps the manifest, rc creates vX.Y.(Z+1)-rc.N. Existing tags never move."
+        description: "Mode. Stable releases v1.2.4, rc releases v1.2.4-rc.1. Existing tags never move."
         required: true
         default: stable
         type: choice
@@ -304,7 +305,7 @@ jobs:
         run: .github/scripts/print_the_dry_run_summary.sh
 
   tag:
-    name: Create the release tag
+    name: Tag ${{ needs.resolve.outputs.tag_name }}
     runs-on: ubuntu-latest
     needs:
       - resolve
@@ -328,7 +329,7 @@ jobs:
         run: .github/scripts/create_the_release_tag.sh
 
   publish:
-    name: Publish the release
+    name: Publish ${{ needs.resolve.outputs.tag_name }}
     needs:
       - resolve
       - validate
@@ -350,7 +351,7 @@ jobs:
       prerelease: ${{ needs.resolve.outputs.prerelease == 'true' }}
 
   summary:
-    name: Release report
+    name: ${{ needs.resolve.outputs.tag_name || 'Release' }} report
     runs-on: ubuntu-latest
     needs:
       - prepare
