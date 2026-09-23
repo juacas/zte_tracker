@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.1.1
+
+- Fix reboot on ZTE H2640 (firmware PMZHP_1.0.4) (#79)
+- Add ZTE H6745 V3 model support (#74) (#81)
+- Extend support bundle with recursive discovery and WAN-view probing (#86)
+- Expose WAN public IP/DNS/gateway, GPON optical diagnostics, and widen support bundle discovery (#87)
+- Recognize 3 more nodes, fix discovery request-type guess, add Tests badge (#88)
+- Add H2640 DSL WAN status support (#75) (#82)
+- fix: check out the requested tag on manual runs, and correct changelog selection (#89)
+- feat: release the whole thing from one workflow run (#90)
+- fix: start Auto Release only from the Actions tab, and three bugs found auditing #90 (#92)
+- docs: make the Auto Release form readable (#93)
+- fix: check the tree out before running the tag and dry run scripts (#94)
+- feat: write the version and the changelog to every run summary (#95)
+- fix: stop the run summary listing the version three times (#96)
+- feat: show the whole changelog in the run summary (#97)
+- feat: name a run after what it is doing (#98)
+- feat: record on the summary what the run was started with (#99)
+- fix: show the version the run is actually about in the job names (#100)
+- fix: name a run after the merge mode it actually used, and keep the release prep commit out of the notes (#101)
+
 ## v2.1.0
 
 ### Added
