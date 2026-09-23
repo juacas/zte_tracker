@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       bump:
-        description: "Version step. Auto infers it from the conventional commit subjects since the last stable tag, and falls back to patch."
+        description: "Version step: auto reads it from the commit subjects, else patch, minor or major."
         required: true
         default: auto
         type: choice
@@ -16,12 +16,12 @@ on:
           - major
       auto_merge:
         # Off no longer ends the run: the job waits for your merge, so one dispatch still produces the release.
-        description: "On: merge the release pull request automatically and publish. Off: the run opens it, then waits up to 5 hours for you to merge it yourself, and publishes what you merged. Closing it without merging cancels the release."
+        description: "Auto merge and publish. Off: opens the pull request and waits up to 5 hours for you to merge it."
         required: false
         default: true
         type: boolean
       mode:
-        description: "Stable releases a new manifest version. RC creates vX.Y.(Z+1)-rc.N. Existing tags are never moved."
+        description: "Mode: stable bumps the manifest, rc creates vX.Y.(Z+1)-rc.N. Existing tags never move."
         required: true
         default: stable
         type: choice
@@ -29,17 +29,17 @@ on:
           - stable
           - rc
       dry_run:
-        description: "Validate and print the proposed operation. Creates no branch, commit, pull request, merge, tag or release."
+        description: "Dry run: print the plan and change nothing."
         required: false
         default: false
         type: boolean
       release_notes:
-        description: "Optional free text placed above the generated entries in the changelog section and the release body."
+        description: "Release notes: optional text placed above the generated entries."
         required: false
         default: ""
         type: string
       target_sha:
-        description: "Advanced recovery override. Must be an ancestor of master. Cannot release an unmerged hotfix branch or move an existing tag."
+        description: "Target commit: recovery override, must already be on master."
         required: false
         default: ""
         type: string
