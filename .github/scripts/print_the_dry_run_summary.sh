@@ -2,7 +2,7 @@
 # Prints the resolved plan to the job summary. Writes nothing.
 set -euo pipefail
 
-for name in CHANGELOG_VERSION MANIFEST_VERSION PRERELEASE SHOULD_PUBLISH SHOULD_TAG TAG_MESSAGE TAG_NAME TAG_STATE TARGET_SHA; do
+for name in CHANGELOG_VERSION MANIFEST_VERSION PLANNED_VERSION PRERELEASE SHOULD_PUBLISH SHOULD_TAG TAG_MESSAGE TAG_NAME TAG_STATE TARGET_SHA; do
   [ -n "${!name+x}" ] || { echo "Missing required environment variable: $name" >&2; exit 1; }
 done
 make_latest=true
@@ -11,6 +11,10 @@ if [ "$PRERELEASE" = "true" ]; then
 fi
 {
   printf 'Dry run only. No tag, release, asset, or repository write was created.\n'
+  if [ -n "$PLANNED_VERSION" ]; then
+    printf 'A real run would release %s. Nothing was bumped here, so every field below describes master as it stands today, which is why it can report the current version as already released.\n' "$PLANNED_VERSION"
+  fi
+  printf 'planned_version=%s\n' "${PLANNED_VERSION:-none, this run does not bump a version}"
   printf 'target_sha=%s\n' "$TARGET_SHA"
   printf 'manifest_version=%s\n' "$MANIFEST_VERSION"
   printf 'changelog_version=%s\n' "$CHANGELOG_VERSION"
