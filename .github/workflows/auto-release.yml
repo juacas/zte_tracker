@@ -1,0 +1,318 @@
+name: Auto Release
+
+on:
+  # GITHUB_TOKEN merges do not emit push events, so auto_merge publishes in the dispatch run.
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version step. Auto infers it from the conventional commit subjects since the last stable tag, and falls back to patch."
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+      auto_merge:
+        description: "Merge the release pull request in this same run and publish immediately. Turn it off to review and merge that pull request yourself."
+        required: false
+        default: true
+        type: boolean
+      mode:
+        description: "Stable releases a new manifest version. RC creates vX.Y.(Z+1)-rc.N. Existing tags are never moved."
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - rc
+      dry_run:
+        description: "Validate and print the proposed operation. Creates no branch, commit, pull request, merge, tag or release."
+        required: false
+        default: false
+        type: boolean
+      release_notes:
+        description: "Optional free text placed above the generated entries in the changelog section and the release body."
+        required: false
+        default: ""
+        type: string
+      target_sha:
+        description: "Advanced recovery override. Must be an ancestor of master. Cannot release an unmerged hotfix branch or move an existing tag."
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: zte-release
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+
+  prepare:
+    name: Prepare a stable release pull request
+    runs-on: ubuntu-latest
+    # Push and RC runs already have a target tree.
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'stable'
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      should_prepare: ${{ steps.plan.outputs.should_prepare }}
+      next_version: ${{ steps.plan.outputs.next_version }}
+      bump: ${{ steps.plan.outputs.bump }}
+      merged_sha: ${{ steps.merge.outputs.merged_sha }}
+      pr_url: ${{ steps.pr.outputs.pull-request-url }}
+    steps:
+
+      - name: Checkout master
+        uses: actions/checkout@v5
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Check release prerequisites
+        env:
+          AUTO_MERGE: ${{ inputs.auto_merge }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/check_release_prerequisites.sh
+
+      - name: Work out the next version
+        id: plan
+        env:
+          BUMP_INPUT: ${{ inputs.bump }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: .github/scripts/work_out_the_next_version.sh
+
+      - name: Report the planned release
+        if: steps.plan.outputs.should_prepare == 'true' && inputs.dry_run
+        env:
+          BUMP: ${{ steps.plan.outputs.bump }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+        run: .github/scripts/report_the_planned_release.sh
+
+      - name: Write the manifest and changelog
+        if: steps.plan.outputs.should_prepare == 'true' && !inputs.dry_run
+        env:
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: .github/scripts/write_manifest_and_changelog.sh
+
+      - name: Prepare release pull request details
+        id: pr_data
+        if: steps.plan.outputs.should_prepare == 'true' && !inputs.dry_run
+        env:
+          AUTO_MERGE: ${{ inputs.auto_merge }}
+          GH_TOKEN: ${{ github.token }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+        run: .github/scripts/prepare_release_pull_request_details.sh
+
+      - name: Open the release pull request
+        id: pr
+        if: steps.plan.outputs.should_prepare == 'true' && !inputs.dry_run
+        uses: peter-evans/create-pull-request@84ae59a2cdc2258d6fa0732dd66352dddae2a412 # v7.0.9
+        with:
+          token: ${{ github.token }}
+          add-paths: |
+            CHANGELOG.md
+            custom_components/zte_tracker/manifest.json
+          base: master
+          branch: ${{ steps.pr_data.outputs.branch }}
+          commit-message: "chore(release): prepare ${{ steps.plan.outputs.next_version }}"
+          title: "chore(release): ${{ steps.plan.outputs.next_version }}"
+          body-path: ${{ steps.pr_data.outputs.body_path }}
+          sign-commits: true
+
+      - name: Stop for manual merge
+        if: steps.pr.outputs.pull-request-number != '' && !inputs.auto_merge
+        env:
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
+        run: .github/scripts/stop_for_manual_merge.sh
+
+      - name: Merge the release pull request
+        id: merge
+        if: steps.pr.outputs.pull-request-number != '' && inputs.auto_merge
+        env:
+          BASE_SHA: ${{ steps.pr_data.outputs.base_sha }}
+          BRANCH: ${{ steps.pr.outputs.pull-request-branch }}
+          GH_TOKEN: ${{ github.token }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+        run: .github/scripts/merge_the_release_pull_request.sh
+
+  resolve:
+    name: Choose what to release
+    runs-on: ubuntu-latest
+    needs: prepare
+    # Manual handoff stops here; merging the pull request starts a push run.
+    if: >-
+      always() &&
+      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
+      !(github.event_name == 'workflow_dispatch' && inputs.auto_merge != true && needs.prepare.outputs.pr_url != '')
+    permissions:
+      contents: read
+    outputs:
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+      changelog_version: ${{ steps.resolve.outputs.changelog_version }}
+      manifest_version: ${{ steps.resolve.outputs.manifest_version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      dry_run: ${{ steps.resolve.outputs.dry_run }}
+      should_tag: ${{ steps.resolve.outputs.should_tag }}
+      should_publish: ${{ steps.resolve.outputs.should_publish }}
+      tag_state: ${{ steps.resolve.outputs.tag_state }}
+      target_sha: ${{ steps.resolve.outputs.target_sha }}
+    steps:
+
+      - name: Checkout master
+        uses: actions/checkout@v5
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Choose the release target
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+          MODE: ${{ inputs.mode || 'stable' }}
+          PUSH_SHA: ${{ github.sha }}
+          PREPARED_SHA: ${{ needs.prepare.outputs.merged_sha }}
+          TARGET_SHA_INPUT: ${{ inputs.target_sha || '' }}
+        run: .github/scripts/choose_the_release_target.sh
+
+  validate:
+    name: Validate the release tree
+    runs-on: ubuntu-latest
+    needs: resolve
+    if: needs.resolve.outputs.should_publish == 'true' || needs.resolve.outputs.dry_run == 'true'
+    permissions:
+      contents: read
+    steps:
+
+      - name: Checkout target commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
+
+      - name: Check the changelog
+        if: needs.resolve.outputs.prerelease != 'true'
+        env:
+          VERSION: ${{ needs.resolve.outputs.manifest_version }}
+        run: .github/scripts/check_the_changelog.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run release tests
+        run: .github/scripts/run_release_tests.sh
+
+      - name: Run hassfest
+        uses: home-assistant/actions/hassfest@58bff37c8947f690ace498be413a9b78d6f30f93 # master
+
+      - name: Run HACS validation
+        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
+        with:
+          category: "integration"
+
+  changelog:
+    name: Write the tag message
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - validate
+    if: needs.resolve.outputs.should_publish == 'true' || needs.resolve.outputs.dry_run == 'true'
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      tag_message: ${{ steps.changelog.outputs.tag_message }}
+    steps:
+
+      - name: Checkout target commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
+          fetch-depth: 0
+
+      - name: Write the tag message
+        id: changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGELOG_VERSION: ${{ needs.resolve.outputs.changelog_version }}
+          DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
+        run: .github/scripts/write_the_tag_message.sh
+
+  dry-run:
+    name: Print the dry run summary
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - changelog
+    if: needs.resolve.outputs.dry_run == 'true'
+    permissions:
+      contents: read
+    steps:
+
+      - name: Print the dry run summary
+        env:
+          CHANGELOG_VERSION: ${{ needs.resolve.outputs.changelog_version }}
+          MANIFEST_VERSION: ${{ needs.resolve.outputs.manifest_version }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          SHOULD_PUBLISH: ${{ needs.resolve.outputs.should_publish }}
+          SHOULD_TAG: ${{ needs.resolve.outputs.should_tag }}
+          TAG_MESSAGE: ${{ needs.changelog.outputs.tag_message }}
+          TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
+          TAG_STATE: ${{ needs.resolve.outputs.tag_state }}
+          TARGET_SHA: ${{ needs.resolve.outputs.target_sha }}
+        run: .github/scripts/print_the_dry_run_summary.sh
+
+  tag:
+    name: Create the release tag
+    runs-on: ubuntu-latest
+    needs:
+      - resolve
+      - changelog
+    if: needs.resolve.outputs.should_tag == 'true' && needs.resolve.outputs.dry_run != 'true'
+    permissions:
+      contents: write
+    steps:
+
+      - name: Create the release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
+          TAG_MESSAGE: ${{ needs.changelog.outputs.tag_message }}
+          TARGET_SHA: ${{ needs.resolve.outputs.target_sha }}
+        run: .github/scripts/create_the_release_tag.sh
+
+  publish:
+    name: Publish the release
+    needs:
+      - resolve
+      - validate
+      - tag
+    # Orphaned tags skip tag creation but still need release publication.
+    if: >-
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.validate.result == 'success' &&
+      needs.resolve.outputs.should_publish == 'true' &&
+      needs.resolve.outputs.dry_run != 'true' &&
+      (needs.tag.result == 'success' ||
+       (needs.tag.result == 'skipped' && needs.resolve.outputs.should_tag != 'true'))
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag_name: ${{ needs.resolve.outputs.tag_name }}
+      prerelease: ${{ needs.resolve.outputs.prerelease == 'true' }}

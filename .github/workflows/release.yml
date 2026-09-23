@@ -9,6 +9,57 @@ on:
       tag_name:
         description: "Tag name to use (e.g. v2.0.7)"
         required: true
+        type: string
+      prerelease:
+        description: "Publish the release as a prerelease."
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: "Create the release as a draft so it can be inspected before publishing."
+        required: false
+        default: false
+        type: boolean
+      release_name:
+        description: "Optional release title. Leave empty to use ZTE_TRACKER_<tag>."
+        required: false
+        default: ""
+        type: string
+      make_latest:
+        description: "Latest-release policy. Prereleases and drafts are always forced to false."
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+          - legacy
+  workflow_call:
+    inputs:
+      tag_name:
+        description: "Tag name to publish."
+        required: true
+        type: string
+      prerelease:
+        description: "Publish the release as a prerelease."
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: "Create the release as a draft so it can be inspected before publishing."
+        required: false
+        type: boolean
+        default: false
+      release_name:
+        description: "Optional release title. Leave empty to use ZTE_TRACKER_<tag>."
+        required: false
+        type: string
+        default: ""
+      make_latest:
+        description: "Whether this release becomes Latest. Forced to false for prereleases and drafts."
+        required: false
+        type: string
+        default: "true"
 
 permissions:
   contents: write
@@ -17,19 +68,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      TAG_NAME: ${{ github.event.inputs.tag_name || github.ref_name }}
+      TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
 
     steps:
       - name: Checkout repository (fetch tags)
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag_name || github.ref }}
+          ref: ${{ inputs.tag_name || github.ref }}
 
       - name: Prepare asset name
         run: |
+          set -euo pipefail
+          case "$TAG_NAME" in *[!A-Za-z0-9._-]*|"") echo "Invalid tag name." >&2; exit 1 ;; esac
           ASSET_NAME="zte_tracker-${TAG_NAME}.zip"
-          echo "ASSET_NAME=${ASSET_NAME}" >> $GITHUB_ENV
+          echo "ASSET_NAME=${ASSET_NAME}" >> "$GITHUB_ENV"
           echo "Tag: ${TAG_NAME}"
 
       - name: Debug after prepare (env & git)
@@ -74,7 +127,7 @@ jobs:
         run: |
           set -e
           TAG="${TAG_NAME}"
-          PREV_TAG=$(git for-each-ref --sort=-creatordate --format='%(refname:strip=2)' refs/tags | grep -v "^${TAG}$" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+          PREV_TAG=$(git for-each-ref --merged "${TAG}" --sort=-creatordate --format='%(refname:strip=2)' refs/tags | grep -v "^${TAG}$" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..${TAG}"
           else
@@ -82,7 +135,7 @@ jobs:
           fi
           BODY=$(git --no-pager log --pretty=format:'- %s (%h)' "${RANGE}" || true)
           [ -z "$BODY" ] && BODY="No changes since last release"
-          TAG_MSG=$(git show -s --format=%B "${TAG}" 2>/dev/null || true)
+          TAG_MSG=$(git tag -l --format='%(contents)' "${TAG}" 2>/dev/null || true)
           if [ -n "$TAG_MSG" ]; then
             RELEASE_BODY=$(printf "Release contents: %s\n\nChanges in this release:\n\n%s" "$TAG_MSG" "$BODY")
           else
@@ -106,9 +159,11 @@ jobs:
 
           # A tag message line reading "EOF" would close the block early.
           DELIM="EOF_$(openssl rand -hex 8)"
-          echo "body<<${DELIM}" >> $GITHUB_OUTPUT
-          printf "%s\n" "$RELEASE_BODY" >> $GITHUB_OUTPUT
-          echo "${DELIM}" >> $GITHUB_OUTPUT
+          {
+            echo "body<<${DELIM}"
+            printf "%s\n" "$RELEASE_BODY"
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
 
           printf "%s\n" "$RELEASE_BODY" > dist/release-notes.md
 
@@ -136,17 +191,69 @@ jobs:
           fi
         shell: bash
 
+      - name: Resolve release options
+        id: release-options
+        env:
+          DRAFT: ${{ inputs.draft || false }}
+          MAKE_LATEST_INPUT: ${{ inputs.make_latest || 'true' }}
+          PRERELEASE: ${{ inputs.prerelease || false }}
+          RELEASE_NAME_INPUT: ${{ inputs.release_name || '' }}
+          TAG_PUSH: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+        run: |
+          set -euo pipefail
+          case "$DRAFT" in true|false) ;; *) echo "Invalid draft value: $DRAFT" >&2; exit 1 ;; esac
+          case "$PRERELEASE" in true|false) ;; *) echo "Invalid prerelease value: $PRERELEASE" >&2; exit 1 ;; esac
+
+          # HACS reads the prerelease flag, not the tag spelling, so the two must never disagree.
+          if [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            TAG_PRERELEASE=false
+          else
+            TAG_PRERELEASE=true
+          fi
+          if [ "$TAG_PUSH" = "true" ]; then
+            PRERELEASE=$TAG_PRERELEASE
+          elif [ "$PRERELEASE" != "$TAG_PRERELEASE" ]; then
+            echo "prerelease=$PRERELEASE conflicts with tag $TAG_NAME." >&2
+            exit 1
+          fi
+
+          release_name=$RELEASE_NAME_INPUT
+          if [ -z "$release_name" ]; then
+            release_name="ZTE_TRACKER_${TAG_NAME}"
+          fi
+
+          if [ "$PRERELEASE" = "true" ] || [ "$DRAFT" = "true" ]; then
+            make_latest=false
+          else
+            case "$MAKE_LATEST_INPUT" in
+              true|false|legacy) make_latest=$MAKE_LATEST_INPUT ;;
+              *) echo "make_latest must be true, false, or legacy." >&2; exit 1 ;;
+            esac
+          fi
+
+          delim="EOF_RELEASE_NAME_$(openssl rand -hex 8)"
+          {
+            printf 'release_name<<%s\n' "$delim"
+            printf '%s\n' "$release_name"
+            printf '%s\n' "$delim"
+            printf 'draft=%s\n' "$DRAFT"
+            printf 'prerelease=%s\n' "$PRERELEASE"
+            printf 'make_latest=%s\n' "$make_latest"
+          } >> "$GITHUB_OUTPUT"
+        shell: bash
+
       # Replaces actions/create-release + upload-release-asset, both archived.
       - name: Create release and upload the asset
         # The repair step below is the authority, and covers transient failures.
         continue-on-error: true
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.TAG_NAME }}
-          name: "ZTE_TRACKER_${{ env.TAG_NAME }}"
+          name: ${{ steps.release-options.outputs.release_name }}
           body_path: dist/release-notes.md
-          draft: false
-          prerelease: false
+          draft: ${{ steps.release-options.outputs.draft }}
+          prerelease: ${{ steps.release-options.outputs.prerelease }}
+          make_latest: ${{ steps.release-options.outputs.make_latest }}
           files: dist/${{ env.ASSET_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -155,16 +262,47 @@ jobs:
         # Success above only means the API answered. The old check was "ls dist".
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRAFT: ${{ steps.release-options.outputs.draft }}
+          MAKE_LATEST: ${{ steps.release-options.outputs.make_latest }}
+          PRERELEASE: ${{ steps.release-options.outputs.prerelease }}
+          RELEASE_NAME: ${{ steps.release-options.outputs.release_name }}
         run: |
           set -uo pipefail
           EXPECTED=$(stat -c%s "dist/${ASSET_NAME}")
+          release_flags=()
+          if [ "${DRAFT}" = "true" ]; then
+            release_flags+=(--draft)
+          fi
+          if [ "${PRERELEASE}" = "true" ]; then
+            release_flags+=(--prerelease)
+          fi
+          case "$MAKE_LATEST" in
+            true) release_flags+=(--latest) ;;
+            false) release_flags+=(--latest=false) ;;
+            legacy) ;;
+            *) echo "Invalid make_latest value: $MAKE_LATEST" >&2; exit 1 ;;
+          esac
           asset_size() {
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG_NAME}" \
+            gh release view "${TAG_NAME}" --json assets \
               --jq ".assets[] | select(.name==\"${ASSET_NAME}\") | .size" 2>/dev/null || true
           }
+          edit_flags=(
+            --title "$RELEASE_NAME"
+            --notes-file dist/release-notes.md
+            "--draft=${DRAFT}"
+            "--prerelease=${PRERELEASE}"
+          )
+          case "$MAKE_LATEST" in
+            true) edit_flags+=(--latest) ;;
+            false) edit_flags+=(--latest=false) ;;
+            legacy) ;;
+          esac
           for attempt in 1 2 3 4 5; do
             gh release view "${TAG_NAME}" >/dev/null 2>&1 || gh release create "${TAG_NAME}" \
-              --title "ZTE_TRACKER_${TAG_NAME}" --notes-file dist/release-notes.md || true
+              --verify-tag \
+              --title "$RELEASE_NAME" --notes-file dist/release-notes.md "${release_flags[@]}" || true
+            # The action above can fail after creating a release with the wrong flags, so reconcile every attempt.
+            gh release edit "${TAG_NAME}" "${edit_flags[@]}" >/dev/null || true
             SIZE=$(asset_size)
             [ "${SIZE:-0}" = "${EXPECTED}" ] && { echo "Asset complete, attempt ${attempt}."; exit 0; }
             echo "Attempt ${attempt}: asset ${SIZE:-absent}, re-uploading."
@@ -174,6 +312,17 @@ jobs:
           # The last upload of the loop is never seen by the checks above.
           SIZE=$(asset_size)
           [ "${SIZE:-0}" = "${EXPECTED}" ] && { echo "Asset complete after the final upload."; exit 0; }
-          echo "Asset never landed. Refusing to ship an empty release."
+          if ! gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            echo "No release exists for ${TAG_NAME} and the asset never landed." >&2
+            echo "Check that the tag exists, then re-run this workflow." >&2
+            exit 1
+          fi
+          if [ "${DRAFT}" = "true" ]; then
+            echo "The draft release ${TAG_NAME} exists but its zip asset failed to attach." >&2
+          else
+            echo "The release ${TAG_NAME} IS published and HACS is already serving it." >&2
+          fi
+          echo "Only the downloadable zip asset failed to attach. Upload it by hand:" >&2
+          echo "  gh release upload ${TAG_NAME} dist/${ASSET_NAME} --clobber" >&2
           exit 1
         shell: bash
