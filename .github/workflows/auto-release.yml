@@ -306,7 +306,7 @@ jobs:
         run: .github/scripts/print_the_dry_run_summary.sh
 
   tag:
-    # A skipped job renders a needs expression in its name literally, so this one stays plain text.
+    # GitHub does not evaluate name: for a job it skips, so this one stays plain text.
     name: Tag the release
     runs-on: ubuntu-latest
     needs:
