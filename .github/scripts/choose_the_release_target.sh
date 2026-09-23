@@ -16,7 +16,11 @@ git fetch --force --tags origin refs/heads/master:refs/remotes/origin/master
 # A draft release is invisible to HACS, so only a published one counts as released.
 release_exists() {
   local draft
-  draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$1" --jq .draft 2>&1) && { [ "$draft" = "false" ]; return; }
+  draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$1" --jq .draft 2>&1) && case "$draft" in
+    false) return 0 ;;
+    true) return 1 ;;
+    *) echo "Unexpected answer about $1: $draft" >&2; exit 1 ;;
+  esac
   case "$draft" in
     *"HTTP 404"*) return 1 ;;
     *) echo "Cannot tell whether $1 is already released: $draft" >&2; exit 1 ;;

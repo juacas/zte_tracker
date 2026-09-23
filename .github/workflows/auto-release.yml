@@ -55,7 +55,7 @@ jobs:
   prepare:
     name: Prepare a stable release pull request
     runs-on: ubuntu-latest
-    # Push and RC runs already have a target tree.
+    # target_sha and RC runs already have a target tree.
     if: inputs.mode == 'stable' && inputs.target_sha == ''
     permissions:
       contents: write
@@ -74,12 +74,6 @@ jobs:
           ref: master
           fetch-depth: 0
 
-      - name: Check release prerequisites
-        env:
-          AUTO_MERGE: ${{ inputs.auto_merge }}
-          GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/check_release_prerequisites.sh
-
       - name: Work out the next version
         id: plan
         env:
@@ -87,6 +81,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: .github/scripts/work_out_the_next_version.sh
+
+      - name: Check release prerequisites
+        if: steps.plan.outputs.should_prepare == 'true'
+        env:
+          AUTO_MERGE: ${{ inputs.auto_merge }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/check_release_prerequisites.sh
 
       - name: Report the planned release
         if: steps.plan.outputs.should_prepare == 'true' && inputs.dry_run
