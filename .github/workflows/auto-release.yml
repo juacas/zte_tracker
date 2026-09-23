@@ -283,6 +283,11 @@ jobs:
       contents: read
     steps:
 
+      - name: Checkout target commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
+
       - name: Print the dry run summary
         env:
           CHANGELOG_VERSION: ${{ needs.resolve.outputs.changelog_version }}
@@ -307,6 +312,11 @@ jobs:
     permissions:
       contents: write
     steps:
+
+      - name: Checkout target commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve.outputs.target_sha }}
 
       - name: Create the release tag
         env:
