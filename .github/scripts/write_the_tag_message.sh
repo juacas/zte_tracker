@@ -55,6 +55,8 @@ PY
 done < <(git rev-list --reverse "$RANGE")
 # One pull request usually holds several commits, and the API names it for every one of them.
 awk '!seen[$0]++' "$entries" > "$entries.unique" && mv "$entries.unique" "$entries"
+# The commit that bumped the manifest is part of this release, not a change worth listing in it.
+sed -i '/^- chore(release): /d' "$entries"
 
 if [ ! -s "$entries" ]; then
   printf -- '- No changes since last release\n' > "$entries"

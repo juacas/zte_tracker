@@ -133,7 +133,7 @@ jobs:
           else
             RANGE="${TAG}"
           fi
-          BODY=$(git --no-pager log --pretty=format:'- %s (%h)' "${RANGE}" || true)
+          BODY=$(git --no-pager log --pretty=format:'- %s (%h)' "${RANGE}" | sed '/^- chore(release): /d' || true)
           [ -z "$BODY" ] && BODY="No changes since last release"
           TAG_MSG=$(git tag -l --format='%(contents)' "${TAG}" 2>/dev/null || true)
           if [ -n "$TAG_MSG" ]; then
