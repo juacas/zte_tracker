@@ -196,10 +196,11 @@ jobs:
 
       - name: Check master back out
         # The merge scripts must come from master, not from whatever version opened a pull request days ago.
+        # github.sha, not master, so the scripts match the workflow file GitHub loaded when this run started.
         if: steps.pr_checkout.outcome == 'success'
         uses: actions/checkout@v5
         with:
-          ref: master
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Wait for you to merge the release pull request
