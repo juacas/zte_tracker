@@ -1,5 +1,5 @@
 name: Auto Release
-run-name: "${{ inputs.dry_run && 'DRY RUN' || 'Release' }} | ${{ inputs.mode }} ${{ inputs.bump }}${{ inputs.auto_merge && '' || ' | manual merge' }}${{ inputs.target_sha && format(' | from {0}', inputs.target_sha) || '' }}"
+run-name: "${{ inputs.dry_run && 'DRY RUN' || 'Release' }} | ${{ inputs.mode }} ${{ inputs.bump }} | ${{ inputs.auto_merge && 'auto merge' || 'manual merge' }}${{ inputs.target_sha && format(' | from {0}', inputs.target_sha) || '' }}"
 
 on:
   # A release is never automatic: nothing here fires on a push. Someone has to start this workflow from the Actions tab.
@@ -40,7 +40,7 @@ on:
         default: ""
         type: string
       target_sha:
-        description: "Target commit: recovery override, must already be on master."
+        description: "Target commit: publish this commit as it is, without bumping. Must be master's current head."
         required: false
         default: ""
         type: string
