@@ -16,7 +16,7 @@ on:
           - major
       auto_merge:
         # Off no longer ends the run: the job waits for your merge, so one dispatch still produces the release.
-        description: "On: merge the release pull request automatically and publish. Off: the run opens it, then waits up to 60 minutes for you to merge it yourself, and publishes what you merged. Closing it without merging cancels the release."
+        description: "On: merge the release pull request automatically and publish. Off: the run opens it, then waits up to 5 hours for you to merge it yourself, and publishes what you merged. Closing it without merging cancels the release."
         required: false
         default: true
         type: boolean
@@ -75,8 +75,16 @@ jobs:
           ref: master
           fetch-depth: 0
 
+      - name: Look for a release pull request left open
+        id: existing
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/find_the_open_release_pull_request.sh
+
       - name: Work out the next version
         id: plan
+        if: steps.existing.outputs.pr_number == ''
         env:
           BUMP_INPUT: ${{ inputs.bump }}
           GH_TOKEN: ${{ github.token }}
@@ -131,24 +139,28 @@ jobs:
 
       - name: Wait for you to merge the release pull request
         id: wait
-        if: steps.pr.outputs.pull-request-number != '' && !inputs.auto_merge
+        if: >-
+          (steps.pr.outputs.pull-request-number != '' || steps.existing.outputs.pr_number != '')
+          && !inputs.auto_merge
         env:
           GH_TOKEN: ${{ github.token }}
-          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
-          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
-          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
-          WAIT_MINUTES: "60"
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version || steps.existing.outputs.version }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number || steps.existing.outputs.pr_number }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url || steps.existing.outputs.pr_url }}
+          WAIT_MINUTES: "300"
         run: .github/scripts/wait_for_the_release_pull_request.sh
 
       - name: Merge the release pull request
         id: merge
-        if: steps.pr.outputs.pull-request-number != '' && inputs.auto_merge
+        if: >-
+          (steps.pr.outputs.pull-request-number != '' || steps.existing.outputs.pr_number != '')
+          && inputs.auto_merge
         env:
-          BASE_SHA: ${{ steps.pr_data.outputs.base_sha }}
-          BRANCH: ${{ steps.pr.outputs.pull-request-branch }}
+          BASE_SHA: ${{ steps.pr_data.outputs.base_sha || steps.existing.outputs.base_sha }}
+          BRANCH: ${{ steps.pr.outputs.pull-request-branch || steps.existing.outputs.branch }}
           GH_TOKEN: ${{ github.token }}
-          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
-          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version || steps.existing.outputs.version }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number || steps.existing.outputs.pr_number }}
         run: .github/scripts/merge_the_release_pull_request.sh
 
   resolve:
