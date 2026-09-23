@@ -375,6 +375,5 @@ jobs:
           PUBLISH_RESULT: ${{ needs.publish.result }}
           TAG_MESSAGE: ${{ needs.changelog.outputs.tag_message }}
           TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
-          TAG_STATE: ${{ needs.resolve.outputs.tag_state }}
           TARGET_SHA: ${{ needs.resolve.outputs.target_sha }}
         run: .github/scripts/write_the_run_summary.sh
