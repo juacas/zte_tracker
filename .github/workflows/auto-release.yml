@@ -157,6 +157,8 @@ jobs:
           ref: ${{ steps.pr.outputs.pull-request-branch || steps.existing.outputs.branch }}
           # The merge step compares history afterwards, which a shallow checkout cannot do.
           fetch-depth: 0
+          # This job can write, and the steps below run third party code, so leave it no token to find.
+          persist-credentials: false
 
       - name: Check the changelog on the release pull request
         if: steps.pr_checkout.outcome == 'success'
@@ -178,11 +180,27 @@ jobs:
         if: steps.pr_checkout.outcome == 'success'
         uses: home-assistant/actions/hassfest@master
 
-      - name: Run HACS validation on the release pull request
+      # HACS reads the repository through the API at the event ref, which is master, so it cannot check this
+      # branch. The validate job runs it after the merge, where the token is read only.
+
+      - name: Close the release pull request that failed validation
+        # pr_checkout only succeeds if everything before it did, and the merge steps come later, so a failure
+        # here can only be one of the checks above. Leaving the branch would make every retry reuse and fail on it.
+        if: failure() && steps.pr_checkout.outcome == 'success'
+        env:
+          BRANCH: ${{ steps.pr.outputs.pull-request-branch || steps.existing.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" >/dev/null 2>&1 || true
+          echo "Validation failed, so ${BRANCH} was removed and master was left alone. Fix master and start again." >&2
+
+      - name: Check master back out
+        # The merge scripts must come from master, not from whatever version opened a pull request days ago.
         if: steps.pr_checkout.outcome == 'success'
-        uses: hacs/action@main
+        uses: actions/checkout@v5
         with:
-          category: "integration"
+          ref: master
+          fetch-depth: 0
 
       - name: Wait for you to merge the release pull request
         id: wait
@@ -205,6 +223,8 @@ jobs:
         env:
           BRANCH: ${{ steps.pr.outputs.pull-request-branch || steps.existing.outputs.branch }}
           GH_TOKEN: ${{ github.token }}
+          # The commit the checks above ran on. Anything pushed since must not reach master unseen.
+          HEAD_SHA: ${{ steps.pr_checkout.outputs.commit }}
           NEXT_VERSION: ${{ steps.plan.outputs.next_version || steps.existing.outputs.version }}
           PR_NUMBER: ${{ steps.pr.outputs.pull-request-number || steps.existing.outputs.pr_number }}
         run: .github/scripts/merge_the_release_pull_request.sh

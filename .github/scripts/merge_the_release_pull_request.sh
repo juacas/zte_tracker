@@ -12,9 +12,8 @@ cleanup_branch() {
   gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" >/dev/null 2>&1 || true
 }
 
-# Read the head before merging, so a push that lands in between makes the merge fail instead of shipping.
-HEAD_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .head.sha)
-export HEAD_SHA
+# The commit the pre merge checks ran on, passed in so that anything pushed since makes the merge fail.
+: "${HEAD_SHA:?Missing required environment variable: HEAD_SHA}"
 
 python3 - > "$SCRATCH/merge-payload.json" <<'PY'
 import json
@@ -39,7 +38,9 @@ if ! merge_response=$(gh api -X PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBE
       echo "  Re-run with auto_merge disabled and merge the pull request yourself." >&2
       ;;
     *409*)
-      echo "The branch moved after this run read it, so the merge was refused on purpose." >&2
+      echo "The branch moved after the checks ran, so the merge was refused on purpose." >&2
+      echo "Someone pushed to ${BRANCH}, so it was left in place. Review it, then re-run." >&2
+      exit 1
       ;;
   esac
   # Deleting the branch closes the pull request too, so the next run starts from a clean master.
@@ -58,6 +59,8 @@ for attempt in 1 2 3 4 5 6; do
   if git merge-base --is-ancestor "$MERGED_SHA" "$CANDIDATE"; then
     echo "master moved past the release commit ${MERGED_SHA} before it could be tagged." >&2
     echo "Re-run this workflow: it will publish master's head instead of an out of date tree." >&2
+    # The pull request did merge, so the branch is spent and would only be reused by mistake.
+    cleanup_branch
     exit 1
   fi
   sleep $((attempt * 5))
