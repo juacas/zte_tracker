@@ -47,7 +47,6 @@ on:
 
 concurrency:
   group: zte-release
-  queue: max
 
 permissions:
   contents: read
@@ -176,6 +175,8 @@ jobs:
       contents: read
     outputs:
       tag_name: ${{ steps.resolve.outputs.tag_name }}
+      # A dry run never merges, so the tag name is still the old version: this is the one the run is really about.
+      planned_version: ${{ needs.prepare.outputs.next_version }}
       changelog_version: ${{ steps.resolve.outputs.changelog_version }}
       manifest_version: ${{ steps.resolve.outputs.manifest_version }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
@@ -305,7 +306,8 @@ jobs:
         run: .github/scripts/print_the_dry_run_summary.sh
 
   tag:
-    name: Tag ${{ needs.resolve.outputs.tag_name }}
+    # A skipped job renders a needs expression in its name literally, so this one stays plain text.
+    name: Tag the release
     runs-on: ubuntu-latest
     needs:
       - resolve
@@ -329,7 +331,7 @@ jobs:
         run: .github/scripts/create_the_release_tag.sh
 
   publish:
-    name: Publish ${{ needs.resolve.outputs.tag_name }}
+    name: Publish ${{ needs.resolve.outputs.planned_version || needs.resolve.outputs.tag_name }}
     needs:
       - resolve
       - validate
@@ -351,7 +353,7 @@ jobs:
       prerelease: ${{ needs.resolve.outputs.prerelease == 'true' }}
 
   summary:
-    name: ${{ needs.resolve.outputs.tag_name || 'Release' }} report
+    name: ${{ needs.resolve.outputs.planned_version || needs.resolve.outputs.tag_name || 'Release' }} report
     runs-on: ubuntu-latest
     needs:
       - prepare
