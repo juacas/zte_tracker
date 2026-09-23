@@ -127,21 +127,6 @@ jobs:
         run: |
           set -e
           TAG="${TAG_NAME}"
-          PREV_TAG=$(git for-each-ref --merged "${TAG}" --sort=-creatordate --format='%(refname:strip=2)' refs/tags | grep -v "^${TAG}$" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
-          if [ -n "$PREV_TAG" ]; then
-            RANGE="${PREV_TAG}..${TAG}"
-          else
-            RANGE="${TAG}"
-          fi
-          BODY=$(git --no-pager log --pretty=format:'- %s (%h)' "${RANGE}" | sed '/^- chore(release): /d' || true)
-          [ -z "$BODY" ] && BODY="No changes since last release"
-          TAG_MSG=$(git tag -l --format='%(contents)' "${TAG}" 2>/dev/null || true)
-          if [ -n "$TAG_MSG" ]; then
-            RELEASE_BODY=$(printf "Release contents: %s\n\nChanges in this release:\n\n%s" "$TAG_MSG" "$BODY")
-          else
-            RELEASE_BODY=$(printf "Changes in this release:\n\n%s" "$BODY")
-          fi
-
           # This version's section only: the whole file used to be pasted in.
           CHANGELOG_CONTENT=$(awk -v tag="${TAG}" '
             function norm(s) { sub(/ +-.*$/, "", s); gsub(/[][]/, "", s); sub(/-rc\.[0-9]+$/, "", s); sub(/^v/, "", s); return s }
@@ -154,10 +139,21 @@ jobs:
             found { print }
           ' CHANGELOG.md 2>/dev/null || true)
           if [ -n "$CHANGELOG_CONTENT" ]; then
-            RELEASE_BODY=$(printf "%s\n\n---\n\n%s" "$CHANGELOG_CONTENT" "$RELEASE_BODY")
+            RELEASE_BODY="$CHANGELOG_CONTENT"
+          else
+            # No section for this tag, so describe the release with the commit subjects instead.
+            PREV_TAG=$(git for-each-ref --merged "${TAG}" --sort=-creatordate --format='%(refname:strip=2)' refs/tags | grep -v "^${TAG}$" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+            if [ -n "$PREV_TAG" ]; then
+              RANGE="${PREV_TAG}..${TAG}"
+            else
+              RANGE="${TAG}"
+            fi
+            BODY=$(git --no-pager log --pretty=format:'- %s (%h)' "${RANGE}" | sed '/^- chore(release): /d' || true)
+            [ -z "$BODY" ] && BODY="No changes since last release"
+            RELEASE_BODY=$(printf "Changes in this release:\n\n%s" "$BODY")
           fi
 
-          # A tag message line reading "EOF" would close the block early.
+          # A body line reading "EOF" would close the block early.
           DELIM="EOF_$(openssl rand -hex 8)"
           {
             echo "body<<${DELIM}"
