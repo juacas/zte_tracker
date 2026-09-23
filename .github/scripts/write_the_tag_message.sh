@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the annotated tag message and release body from the changelog section.
-# Outputs: tag_message
+# Outputs: tag_message, changelog_entries
 set -euo pipefail
 
 for name in CHANGELOG_VERSION DRY_RUN GH_TOKEN GITHUB_OUTPUT GITHUB_REPOSITORY; do
@@ -74,5 +74,11 @@ if extra:
 delimiter = f"EOF_TAG_MESSAGE_{uuid.uuid4().hex}"
 print(f"tag_message<<{delimiter}")
 print(message)
+print(delimiter)
+# The tag message is capped for readability; the run summary shows every entry.
+delimiter = f"EOF_ENTRIES_{uuid.uuid4().hex}"
+print(f"changelog_entries<<{delimiter}")
+for entry in entries:
+    print(f"- {entry}")
 print(delimiter)
 PY

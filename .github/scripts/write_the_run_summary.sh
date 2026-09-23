@@ -11,6 +11,7 @@ target_sha="${TARGET_SHA:-}"
 manifest_version="${MANIFEST_VERSION:-}"
 prerelease="${PRERELEASE:-}"
 tag_message="${TAG_MESSAGE:-}"
+changelog_entries="${CHANGELOG_ENTRIES:-}"
 pr_url="${PR_URL:-}"
 publish_result="${PUBLISH_RESULT:-}"
 
@@ -24,7 +25,6 @@ case "$dry_run:$publish_result" in
 esac
 
 {
-  printf '## Release summary\n\n'
   printf '| | |\n|---|---|\n'
   if [ "$dry_run" = "true" ]; then
     printf '| Would release | %s |\n' "${planned_version:-nothing, this run does not bump a version}"
@@ -36,8 +36,10 @@ esac
   if [ -n "$target_sha" ]; then printf '| Commit | `%s` |\n' "${target_sha:0:12}"; fi
   if [ "$prerelease" = "true" ]; then printf '| Prerelease | yes |\n'; fi
   if [ -n "$pr_url" ]; then printf '| Release pull request | %s |\n' "$pr_url"; fi
-  printf '\n### Changelog\n\n'
-  if [ -n "$tag_message" ]; then
+  printf '\n## Changelog\n\n'
+  if [ -n "$changelog_entries" ]; then
+    printf '%s\n' "$changelog_entries"
+  elif [ -n "$tag_message" ]; then
     printf '%s\n' "$tag_message" | tr ';' '\n' | sed 's/^ *//; s/^./- &/'
   else
     printf 'No changelog was produced for this run.\n'

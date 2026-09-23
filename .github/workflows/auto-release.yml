@@ -248,6 +248,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      changelog_entries: ${{ steps.changelog.outputs.changelog_entries }}
       tag_message: ${{ steps.changelog.outputs.tag_message }}
     steps:
 
@@ -349,7 +350,7 @@ jobs:
       prerelease: ${{ needs.resolve.outputs.prerelease == 'true' }}
 
   summary:
-    name: Write the run summary
+    name: Release report
     runs-on: ubuntu-latest
     needs:
       - prepare
@@ -367,6 +368,7 @@ jobs:
 
       - name: Write the run summary
         env:
+          CHANGELOG_ENTRIES: ${{ needs.changelog.outputs.changelog_entries }}
           DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
           MANIFEST_VERSION: ${{ needs.resolve.outputs.manifest_version }}
           PLANNED_VERSION: ${{ needs.prepare.outputs.next_version }}
