@@ -3,7 +3,7 @@
 # Outputs: changelog_version, dry_run, manifest_version, prerelease, should_publish, should_tag, tag_name, tag_state, target_sha
 set -euo pipefail
 
-for name in DRY_RUN GH_TOKEN GITHUB_EVENT_NAME GITHUB_OUTPUT GITHUB_REPOSITORY MODE PREPARED_SHA PUSH_SHA TARGET_SHA_INPUT; do
+for name in DRY_RUN GH_TOKEN GITHUB_OUTPUT GITHUB_REPOSITORY MODE PREPARED_SHA TARGET_SHA_INPUT; do
   [ -n "${!name+x}" ] || { echo "Missing required environment variable: $name" >&2; exit 1; }
 done
 case "$MODE" in
@@ -37,8 +37,6 @@ elif [ -n "$PREPARED_SHA" ]; then
     echo "The commit prepared by this run is not visible on master." >&2
     exit 1
   }
-elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
-  TARGET_SHA=$PUSH_SHA
 else
   TARGET_SHA=$(git rev-parse refs/remotes/origin/master)
 fi
