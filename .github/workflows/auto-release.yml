@@ -371,6 +371,11 @@ jobs:
         env:
           CHANGELOG_ENTRIES: ${{ needs.changelog.outputs.changelog_entries }}
           DRY_RUN: ${{ needs.resolve.outputs.dry_run }}
+          INPUT_AUTO_MERGE: ${{ inputs.auto_merge }}
+          INPUT_BUMP: ${{ inputs.bump }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_RELEASE_NOTES: ${{ inputs.release_notes }}
+          INPUT_TARGET_SHA: ${{ inputs.target_sha }}
           MANIFEST_VERSION: ${{ needs.resolve.outputs.manifest_version }}
           PLANNED_VERSION: ${{ needs.prepare.outputs.next_version }}
           PR_URL: ${{ needs.prepare.outputs.pr_url }}
