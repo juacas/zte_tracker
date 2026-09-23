@@ -15,7 +15,12 @@ case "$DRY_RUN" in true|false) ;; *) echo "Invalid dry_run value: $DRY_RUN" >&2;
 git fetch --force --tags origin refs/heads/master:refs/remotes/origin/master
 # A draft release is invisible to HACS, so only a published one counts as released.
 release_exists() {
-  [ "$(gh release view "$1" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" = "false" ]
+  local draft
+  draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$1" --jq .draft 2>&1) && { [ "$draft" = "false" ]; return; }
+  case "$draft" in
+    *"HTTP 404"*) return 1 ;;
+    *) echo "Cannot tell whether $1 is already released: $draft" >&2; exit 1 ;;
+  esac
 }
 if [ -n "$TARGET_SHA_INPUT" ]; then
   if [[ ! "$TARGET_SHA_INPUT" =~ ^[0-9a-fA-F]{7,40}$ ]]; then

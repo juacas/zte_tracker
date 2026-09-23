@@ -56,7 +56,7 @@ jobs:
     name: Prepare a stable release pull request
     runs-on: ubuntu-latest
     # Push and RC runs already have a target tree.
-    if: inputs.mode == 'stable'
+    if: inputs.mode == 'stable' && inputs.target_sha == ''
     permissions:
       contents: write
       pull-requests: write

@@ -11,7 +11,7 @@ export SCRATCH="${RUNNER_TEMP:-$PWD}"
 CURRENT_MASTER=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/master" --jq '.object.sha')
 if [ "$CURRENT_MASTER" != "$TARGET_SHA" ]; then
   echo "Refusing to tag stale target $TARGET_SHA; master is now $CURRENT_MASTER." >&2
-  echo "The queued workflow for the newer master commit will handle the release." >&2
+  echo "Start Auto Release again from the Actions tab: it publishes master's head without bumping a second version." >&2
   exit 1
 fi
 python3 - <<'PY'
