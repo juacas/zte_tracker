@@ -10,6 +10,7 @@ export RELEASE_ENTRIES="${RUNNER_TEMP:-$PWD}/release-entries.md"
 python3 - <<'PY'
 import json
 import os
+import re
 from pathlib import Path
 
 version = os.environ["NEXT_VERSION"]
@@ -28,6 +29,9 @@ if json.loads(manifest_path.read_text(encoding="utf-8"))["version"] != version:
 section = [f"## {version}", ""]
 notes = os.environ.get("RELEASE_NOTES", "").strip()
 if notes:
+    # A ## line here would read as the next version heading, cutting this section short for every parser,
+    # including the one below that replaces a repeated run's section.
+    notes = "\n".join(re.sub(r"^##(?!#)", "###", line) for line in notes.splitlines())
     section += [notes, ""]
 section += Path(os.environ["RELEASE_ENTRIES"]).read_text(encoding="utf-8").strip("\n").splitlines() + [""]
 
