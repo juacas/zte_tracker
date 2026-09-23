@@ -68,12 +68,12 @@ fi
 PRERELEASE=false
 CHANGELOG_VERSION="$MANIFEST_VERSION"
 if [ "$MODE" = "rc" ]; then
+  # An rc tags the tree as it is, so manifest.json would still name the previous version and a tester could not
+  # tell what they installed. Refused until the rc path writes the manifest too.
+  echo "rc mode is disabled: it would tag the next patch while the tree still says $MANIFEST_VERSION." >&2
+  echo "Release a stable version, or ask for the rc path to bump the manifest before this is used." >&2
+  exit 1
   PRERELEASE=true
-  # An rc always targets the next patch, so any other bump would tag a version the stable release will never use.
-  if [ "${BUMP_INPUT:-patch}" != patch ]; then
-    echo "rc mode only supports bump: patch, because an rc always targets the next patch." >&2
-    exit 1
-  fi
   VERSION_BODY=${MANIFEST_VERSION#v}
   IFS=. read -r MAJOR MINOR PATCH <<EOF_VERSION
 $VERSION_BODY
