@@ -23,8 +23,8 @@ auto = os.environ.get("AUTO_MERGE") == "true"
 tail = (
     "This run merges this pull request itself, then tags and publishes."
     if auto
-    else "Merge this pull request, then start Auto Release again from the Actions tab, "
-    "with the defaults, to tag and publish " + version + "."
+    else "The run that opened this is waiting for you to merge it, and then tags and publishes "
+    + version + ". Closing it without merging cancels the release."
 )
 Path(os.environ["RELEASE_PR_BODY"]).write_text(
     f"Opened by Auto Release for {version}.\n\n{entries}\n\n{tail}\n",
