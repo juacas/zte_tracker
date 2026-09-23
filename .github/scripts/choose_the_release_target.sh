@@ -3,7 +3,7 @@
 # Outputs: changelog_version, dry_run, manifest_version, prerelease, should_publish, should_tag, tag_name, tag_state, target_sha
 set -euo pipefail
 
-for name in DRY_RUN GH_TOKEN GITHUB_EVENT_NAME GITHUB_OUTPUT GITHUB_REPOSITORY MODE PREPARED_SHA PUSH_SHA TARGET_SHA_INPUT; do
+for name in DRY_RUN GH_TOKEN GITHUB_OUTPUT GITHUB_REPOSITORY MODE PREPARED_SHA TARGET_SHA_INPUT; do
   [ -n "${!name+x}" ] || { echo "Missing required environment variable: $name" >&2; exit 1; }
 done
 case "$MODE" in
@@ -15,7 +15,16 @@ case "$DRY_RUN" in true|false) ;; *) echo "Invalid dry_run value: $DRY_RUN" >&2;
 git fetch --force --tags origin refs/heads/master:refs/remotes/origin/master
 # A draft release is invisible to HACS, so only a published one counts as released.
 release_exists() {
-  [ "$(gh release view "$1" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" = "false" ]
+  local draft
+  draft=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$1" --jq .draft 2>&1) && case "$draft" in
+    false) return 0 ;;
+    true) return 1 ;;
+    *) echo "Unexpected answer about $1: $draft" >&2; exit 1 ;;
+  esac
+  case "$draft" in
+    *"HTTP 404"*) return 1 ;;
+    *) echo "Cannot tell whether $1 is already released: $draft" >&2; exit 1 ;;
+  esac
 }
 if [ -n "$TARGET_SHA_INPUT" ]; then
   if [[ ! "$TARGET_SHA_INPUT" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
@@ -37,8 +46,6 @@ elif [ -n "$PREPARED_SHA" ]; then
     echo "The commit prepared by this run is not visible on master." >&2
     exit 1
   }
-elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
-  TARGET_SHA=$PUSH_SHA
 else
   TARGET_SHA=$(git rev-parse refs/remotes/origin/master)
 fi

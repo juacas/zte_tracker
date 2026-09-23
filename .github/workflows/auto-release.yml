@@ -1,10 +1,7 @@
 name: Auto Release
 
 on:
-  # GITHUB_TOKEN merges do not emit push events, so auto_merge publishes in the dispatch run.
-  push:
-    branches:
-      - master
+  # A release is never automatic: nothing here fires on a push. Someone has to start this workflow from the Actions tab.
   workflow_dispatch:
     inputs:
       bump:
@@ -18,7 +15,8 @@ on:
           - minor
           - major
       auto_merge:
-        description: "Merge the release pull request in this same run and publish immediately. Turn it off to review and merge that pull request yourself."
+        # Off no longer ends the run: the job waits for your merge, so one dispatch still produces the release.
+        description: "On: merge the release pull request automatically and publish. Off: the run opens it, then waits up to 5 hours for you to merge it yourself, and publishes what you merged. Closing it without merging cancels the release."
         required: false
         default: true
         type: boolean
@@ -58,8 +56,8 @@ jobs:
   prepare:
     name: Prepare a stable release pull request
     runs-on: ubuntu-latest
-    # Push and RC runs already have a target tree.
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'stable'
+    # target_sha and RC runs already have a target tree.
+    if: inputs.mode == 'stable' && inputs.target_sha == ''
     permissions:
       contents: write
       pull-requests: write
@@ -67,7 +65,7 @@ jobs:
       should_prepare: ${{ steps.plan.outputs.should_prepare }}
       next_version: ${{ steps.plan.outputs.next_version }}
       bump: ${{ steps.plan.outputs.bump }}
-      merged_sha: ${{ steps.merge.outputs.merged_sha }}
+      merged_sha: ${{ steps.merge.outputs.merged_sha || steps.wait.outputs.merged_sha }}
       pr_url: ${{ steps.pr.outputs.pull-request-url }}
     steps:
 
@@ -77,19 +75,28 @@ jobs:
           ref: master
           fetch-depth: 0
 
-      - name: Check release prerequisites
+      - name: Look for a release pull request left open
+        id: existing
+        if: ${{ !inputs.dry_run }}
         env:
-          AUTO_MERGE: ${{ inputs.auto_merge }}
           GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/check_release_prerequisites.sh
+        run: .github/scripts/find_the_open_release_pull_request.sh
 
       - name: Work out the next version
         id: plan
+        if: steps.existing.outputs.pr_number == ''
         env:
           BUMP_INPUT: ${{ inputs.bump }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: .github/scripts/work_out_the_next_version.sh
+
+      - name: Check release prerequisites
+        if: steps.plan.outputs.should_prepare == 'true'
+        env:
+          AUTO_MERGE: ${{ inputs.auto_merge }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/check_release_prerequisites.sh
 
       - name: Report the planned release
         if: steps.plan.outputs.should_prepare == 'true' && inputs.dry_run
@@ -130,33 +137,40 @@ jobs:
           body-path: ${{ steps.pr_data.outputs.body_path }}
           sign-commits: true
 
-      - name: Stop for manual merge
-        if: steps.pr.outputs.pull-request-number != '' && !inputs.auto_merge
+      - name: Wait for you to merge the release pull request
+        id: wait
+        if: >-
+          (steps.pr.outputs.pull-request-number != '' || steps.existing.outputs.pr_number != '')
+          && !inputs.auto_merge
         env:
-          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
-          PR_URL: ${{ steps.pr.outputs.pull-request-url }}
-        run: .github/scripts/stop_for_manual_merge.sh
+          GH_TOKEN: ${{ github.token }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version || steps.existing.outputs.version }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number || steps.existing.outputs.pr_number }}
+          PR_URL: ${{ steps.pr.outputs.pull-request-url || steps.existing.outputs.pr_url }}
+          WAIT_MINUTES: "300"
+        run: .github/scripts/wait_for_the_release_pull_request.sh
 
       - name: Merge the release pull request
         id: merge
-        if: steps.pr.outputs.pull-request-number != '' && inputs.auto_merge
+        if: >-
+          (steps.pr.outputs.pull-request-number != '' || steps.existing.outputs.pr_number != '')
+          && inputs.auto_merge
         env:
-          BASE_SHA: ${{ steps.pr_data.outputs.base_sha }}
-          BRANCH: ${{ steps.pr.outputs.pull-request-branch }}
+          BASE_SHA: ${{ steps.pr_data.outputs.base_sha || steps.existing.outputs.base_sha }}
+          BRANCH: ${{ steps.pr.outputs.pull-request-branch || steps.existing.outputs.branch }}
           GH_TOKEN: ${{ github.token }}
-          NEXT_VERSION: ${{ steps.plan.outputs.next_version }}
-          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+          NEXT_VERSION: ${{ steps.plan.outputs.next_version || steps.existing.outputs.version }}
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number || steps.existing.outputs.pr_number }}
         run: .github/scripts/merge_the_release_pull_request.sh
 
   resolve:
     name: Choose what to release
     runs-on: ubuntu-latest
     needs: prepare
-    # Manual handoff stops here; merging the pull request starts a push run.
+    # prepare is skipped for rc and target_sha runs, which resolve on their own.
     if: >-
       always() &&
-      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
-      !(github.event_name == 'workflow_dispatch' && inputs.auto_merge != true && needs.prepare.outputs.pr_url != '')
+      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     permissions:
       contents: read
     outputs:
@@ -183,7 +197,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DRY_RUN: ${{ inputs.dry_run || false }}
           MODE: ${{ inputs.mode || 'stable' }}
-          PUSH_SHA: ${{ github.sha }}
           PREPARED_SHA: ${{ needs.prepare.outputs.merged_sha }}
           TARGET_SHA_INPUT: ${{ inputs.target_sha || '' }}
         run: .github/scripts/choose_the_release_target.sh
@@ -217,10 +230,10 @@ jobs:
         run: .github/scripts/run_release_tests.sh
 
       - name: Run hassfest
-        uses: home-assistant/actions/hassfest@58bff37c8947f690ace498be413a9b78d6f30f93 # master
+        uses: home-assistant/actions/hassfest@master
 
       - name: Run HACS validation
-        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
+        uses: hacs/action@main
         with:
           category: "integration"
 
@@ -256,9 +269,16 @@ jobs:
     name: Print the dry run summary
     runs-on: ubuntu-latest
     needs:
+      - prepare
       - resolve
       - changelog
-    if: needs.resolve.outputs.dry_run == 'true'
+    # prepare is skipped for rc and target_sha runs, and a skipped need would skip this job too.
+    if: >-
+      always() &&
+      (needs.prepare.result == 'success' || needs.prepare.result == 'skipped') &&
+      needs.resolve.result == 'success' &&
+      needs.changelog.result == 'success' &&
+      needs.resolve.outputs.dry_run == 'true'
     permissions:
       contents: read
     steps:
@@ -267,6 +287,7 @@ jobs:
         env:
           CHANGELOG_VERSION: ${{ needs.resolve.outputs.changelog_version }}
           MANIFEST_VERSION: ${{ needs.resolve.outputs.manifest_version }}
+          PLANNED_VERSION: ${{ needs.prepare.outputs.next_version }}
           PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
           SHOULD_PUBLISH: ${{ needs.resolve.outputs.should_publish }}
           SHOULD_TAG: ${{ needs.resolve.outputs.should_tag }}
