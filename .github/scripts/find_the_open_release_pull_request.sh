@@ -8,8 +8,11 @@ for name in GH_TOKEN GITHUB_OUTPUT GITHUB_REPOSITORY; do
   [ -n "${!name+x}" ] || { echo "Missing required environment variable: $name" >&2; exit 1; }
 done
 
+# A fork chooses its own branch name, so the origin and the author decide what counts, never the name alone.
 open=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=master&per_page=100" \
-  --jq '.[] | select(.head.ref | startswith("chore/release-"))
+  --jq '.[] | select((.head.ref | startswith("chore/release-"))
+                     and (.head.repo.full_name == env.GITHUB_REPOSITORY)
+                     and (.user.login == "github-actions[bot]"))
         | [(.number | tostring), .html_url, .title, .head.ref, .base.sha] | @tsv')
 
 count=$(printf '%s' "$open" | grep -c . || true)

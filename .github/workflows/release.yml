@@ -1,39 +1,40 @@
 name: Create Release
 
 on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch:
-    inputs:
-      tag_name:
-        description: "Tag name to use (e.g. v2.0.7)"
-        required: true
-        type: string
-      prerelease:
-        description: "Publish the release as a prerelease."
-        required: false
-        default: false
-        type: boolean
-      draft:
-        description: "Create the release as a draft so it can be inspected before publishing."
-        required: false
-        default: false
-        type: boolean
-      release_name:
-        description: "Optional release title. Leave empty to use ZTE_TRACKER_<tag>."
-        required: false
-        default: ""
-        type: string
-      make_latest:
-        description: "Latest-release policy. Prereleases and drafts are always forced to false."
-        required: false
-        default: "true"
-        type: choice
-        options:
-          - "true"
-          - "false"
-          - legacy
+  # Disabled on purpose: both triggers published a release while skipping the Auto Release gates. Uncomment to get the old manual method back.
+  # push:
+  #   tags:
+  #     - "v*"
+  # workflow_dispatch:
+  #   inputs:
+  #     tag_name:
+  #       description: "Tag name to use (e.g. v2.0.7)"
+  #       required: true
+  #       type: string
+  #     prerelease:
+  #       description: "Publish the release as a prerelease."
+  #       required: false
+  #       default: false
+  #       type: boolean
+  #     draft:
+  #       description: "Create the release as a draft so it can be inspected before publishing."
+  #       required: false
+  #       default: false
+  #       type: boolean
+  #     release_name:
+  #       description: "Optional release title. Leave empty to use ZTE_TRACKER_<tag>."
+  #       required: false
+  #       default: ""
+  #       type: string
+  #     make_latest:
+  #       description: "Latest-release policy. Prereleases and drafts are always forced to false."
+  #       required: false
+  #       default: "true"
+  #       type: choice
+  #       options:
+  #         - "true"
+  #         - "false"
+  #         - legacy
   workflow_call:
     inputs:
       tag_name:

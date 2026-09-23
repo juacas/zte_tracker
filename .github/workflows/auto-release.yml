@@ -22,13 +22,14 @@ on:
         default: true
         type: boolean
       mode:
-        description: "Mode. Stable releases v1.2.4, rc releases v1.2.4-rc.1. Existing tags never move."
+        description: "Mode. Stable releases v1.2.4. Existing tags never move."
         required: true
         default: stable
         type: choice
         options:
           - stable
-          - rc
+          # rc is disabled: it tags the tree as it is, so manifest.json would still name the previous version.
+          # - rc
       dry_run:
         description: "Dry run: print the plan and change nothing."
         required: false
@@ -137,6 +138,71 @@ jobs:
           body-path: ${{ steps.pr_data.outputs.body_path }}
           sign-commits: true
 
+      - name: Remove the branch when the pull request was not opened
+        if: failure() && steps.pr_data.outputs.branch != '' && steps.pr.outputs.pull-request-number == ''
+        # create-pull-request pushes the branch before opening the pull request, so a failure there would strand it.
+        env:
+          BRANCH: ${{ steps.pr_data.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" >/dev/null 2>&1 || echo "Nothing to remove."
+
+      - name: Check out the release pull request
+        id: pr_checkout
+        # Validating the branch first keeps a broken tree off master, instead of bumping it and failing afterwards.
+        if: >-
+          (steps.pr.outputs.pull-request-number != '' || steps.existing.outputs.pr_number != '')
+          && !inputs.dry_run
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.pr.outputs.pull-request-branch || steps.existing.outputs.branch }}
+          # The merge step compares history afterwards, which a shallow checkout cannot do.
+          fetch-depth: 0
+          # This job can write, and the steps below run third party code, so leave it no token to find.
+          persist-credentials: false
+
+      - name: Check the changelog on the release pull request
+        if: steps.pr_checkout.outcome == 'success'
+        env:
+          VERSION: ${{ steps.plan.outputs.next_version || steps.existing.outputs.version }}
+        run: .github/scripts/check_the_changelog.sh
+
+      - name: Set up Python
+        if: steps.pr_checkout.outcome == 'success'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run the tests on the release pull request
+        if: steps.pr_checkout.outcome == 'success'
+        run: .github/scripts/run_release_tests.sh
+
+      - name: Run hassfest on the release pull request
+        if: steps.pr_checkout.outcome == 'success'
+        uses: home-assistant/actions/hassfest@master
+
+      # HACS reads the repository through the API at the event ref, which is master, so it cannot check this
+      # branch. The validate job runs it after the merge, where the token is read only.
+
+      - name: Close the release pull request that failed validation
+        # pr_checkout only succeeds if everything before it did, and the merge steps come later, so a failure
+        # here can only be one of the checks above. Leaving the branch would make every retry reuse and fail on it.
+        if: failure() && steps.pr_checkout.outcome == 'success'
+        env:
+          BRANCH: ${{ steps.pr.outputs.pull-request-branch || steps.existing.outputs.branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" >/dev/null 2>&1 || true
+          echo "Validation failed, so ${BRANCH} was removed and master was left alone. Fix master and start again." >&2
+
+      - name: Check master back out
+        # The merge scripts must come from master, not from whatever version opened a pull request days ago.
+        # github.sha, not master, so the scripts match the workflow file GitHub loaded when this run started.
+        if: steps.pr_checkout.outcome == 'success'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
       - name: Wait for you to merge the release pull request
         id: wait
         if: >-
@@ -156,9 +222,10 @@ jobs:
           (steps.pr.outputs.pull-request-number != '' || steps.existing.outputs.pr_number != '')
           && inputs.auto_merge
         env:
-          BASE_SHA: ${{ steps.pr_data.outputs.base_sha || steps.existing.outputs.base_sha }}
           BRANCH: ${{ steps.pr.outputs.pull-request-branch || steps.existing.outputs.branch }}
           GH_TOKEN: ${{ github.token }}
+          # The commit the checks above ran on. Anything pushed since must not reach master unseen.
+          HEAD_SHA: ${{ steps.pr_checkout.outputs.commit }}
           NEXT_VERSION: ${{ steps.plan.outputs.next_version || steps.existing.outputs.version }}
           PR_NUMBER: ${{ steps.pr.outputs.pull-request-number || steps.existing.outputs.pr_number }}
         run: .github/scripts/merge_the_release_pull_request.sh
@@ -199,7 +266,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DRY_RUN: ${{ inputs.dry_run || false }}
           MODE: ${{ inputs.mode || 'stable' }}
+          NOTES_WRITTEN: ${{ needs.prepare.outputs.should_prepare }}
           PREPARED_SHA: ${{ needs.prepare.outputs.merged_sha }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
           TARGET_SHA_INPUT: ${{ inputs.target_sha || '' }}
         run: .github/scripts/choose_the_release_target.sh
 
@@ -383,6 +452,7 @@ jobs:
           PR_URL: ${{ needs.prepare.outputs.pr_url }}
           PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
+          SHOULD_PUBLISH: ${{ needs.resolve.outputs.should_publish }}
           TAG_MESSAGE: ${{ needs.changelog.outputs.tag_message }}
           TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
           TARGET_SHA: ${{ needs.resolve.outputs.target_sha }}

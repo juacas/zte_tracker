@@ -11,6 +11,10 @@ case "$MODE" in
   *) echo "Unsupported release mode: $MODE" >&2; exit 1 ;;
 esac
 case "$DRY_RUN" in true|false) ;; *) echo "Invalid dry_run value: $DRY_RUN" >&2; exit 1 ;; esac
+# Only a run that writes a new changelog section can carry the notes, so say so rather than dropping them in silence.
+if [ -n "${RELEASE_NOTES:-}" ] && [ "${NOTES_WRITTEN:-}" != "true" ]; then
+  echo "::warning::release_notes was ignored: this run did not write a new changelog section."
+fi
 
 git fetch --force --tags origin refs/heads/master:refs/remotes/origin/master
 # A draft release is invisible to HACS, so only a published one counts as released.
@@ -64,6 +68,11 @@ fi
 PRERELEASE=false
 CHANGELOG_VERSION="$MANIFEST_VERSION"
 if [ "$MODE" = "rc" ]; then
+  # An rc tags the tree as it is, so manifest.json would still name the previous version and a tester could not
+  # tell what they installed. Refused until the rc path writes the manifest too.
+  echo "rc mode is disabled: it would tag the next patch while the tree still says $MANIFEST_VERSION." >&2
+  echo "Release a stable version, or ask for the rc path to bump the manifest before this is used." >&2
+  exit 1
   PRERELEASE=true
   VERSION_BODY=${MANIFEST_VERSION#v}
   IFS=. read -r MAJOR MINOR PATCH <<EOF_VERSION
