@@ -30,7 +30,8 @@ if [ "$dry_run" = "true" ]; then
   settings="${settings}, dry run"
 fi
 if [ -n "$input_target_sha" ]; then
-  settings="${settings}, target ${input_target_sha:0:12}"
+  # This one is free text too: resolve would reject a bad value, but this job also runs after resolve fails.
+  settings="${settings}, target $(printf '%s' "${input_target_sha:0:12}" | tr -d '|\n')"
 fi
 # The text itself can hold pipes and newlines, which would break the table.
 if [ -n "$input_release_notes" ]; then
