@@ -819,11 +819,11 @@ class zteClient:
                     if pname == "WANCName" and pvalue == "WAN_internet":
                         wan_node = inst
                         break
-                if wan_node:
+                if wan_node is not None:  # truth-testing an Element is deprecated
                     break
             if wan_node is None and instances:
                 wan_node = instances[0]
-            if wan_node:
+            if wan_node is not None:  # truth-testing an Element is deprecated
                 for i in range(0, len(wan_node) // 2):
                     pname = wan_node[i * 2].text
                     pvalue = wan_node[i * 2 + 1].text
