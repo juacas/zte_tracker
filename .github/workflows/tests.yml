@@ -28,4 +28,5 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r tests/requirements_test.txt
-      - run: pytest tests/ --cov=custom_components/zte_tracker --cov-report=term-missing
+      # -m pytest, not the bare binary: puts the repo root on sys.path so custom_components resolves.
+      - run: python -m pytest tests/ --cov=custom_components/zte_tracker --cov-report=term-missing
