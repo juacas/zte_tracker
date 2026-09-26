@@ -1,8 +1,27 @@
 """Test configuration for ZTE Tracker integration."""
+
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
+
+
+@pytest.fixture(autouse=True)
+def enable_event_loop_debug():
+    """Override pytest-homeassistant-custom-component's fixture of the same name.
+
+    Python 3.13 removed asyncio.get_event_loop()'s implicit loop creation, so the
+    upstream fixture raises RuntimeError for any sync test with no running loop.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.set_debug(True)
+    yield
+    loop.set_debug(False)
 
 
 @pytest.fixture
@@ -14,7 +33,7 @@ def mock_config_entry():
         title="ZTE Router",
         data={
             "host": "192.168.1.1",
-            "username": "admin", 
+            "username": "admin",
             "password": "admin",
             "model": "F6640",
         },
