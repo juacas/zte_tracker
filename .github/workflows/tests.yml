@@ -17,3 +17,15 @@ jobs:
 
       # The release runs this same script, so a test added here always gates a release too.
       - run: .github/scripts/run_release_tests.sh
+
+  pytest-ha:
+    name: Pytest (Home Assistant)
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: "actions/checkout@v5"
+      # The real homeassistant package (>= 2026.1.0, see manifest.json) requires 3.13+.
+      - uses: "actions/setup-python@v6"
+        with:
+          python-version: "3.13"
+      - run: pip install -r tests/requirements_test.txt
+      - run: pytest tests/ --cov=custom_components/zte_tracker --cov-report=term-missing
