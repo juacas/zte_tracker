@@ -9,6 +9,8 @@ jobs:
   tests:
     name: Tests
     runs-on: "ubuntu-latest"
+    # The release pull request runs these same checks itself and merges before this can finish.
+    if: ${{ !startsWith(github.head_ref, 'chore/release-') && !startsWith(github.ref_name, 'chore/release-') }}
     steps:
       - uses: "actions/checkout@v5"
       - uses: "actions/setup-python@v6"
@@ -21,6 +23,7 @@ jobs:
   pytest-ha:
     name: Pytest (Home Assistant)
     runs-on: "ubuntu-latest"
+    if: ${{ !startsWith(github.head_ref, 'chore/release-') && !startsWith(github.ref_name, 'chore/release-') }}
     steps:
       - uses: "actions/checkout@v5"
       # The real homeassistant package (>= 2026.1.0, see manifest.json) requires 3.13+.

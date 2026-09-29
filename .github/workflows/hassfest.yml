@@ -9,6 +9,8 @@ on:
 jobs:
   validate:
     runs-on: "ubuntu-latest"
+    # The release pull request runs its own hassfest step and merges before this can finish.
+    if: ${{ !startsWith(github.head_ref, 'chore/release-') && !startsWith(github.ref_name, 'chore/release-') }}
     steps:
         - uses: "actions/checkout@v5"
         - uses: "home-assistant/actions/hassfest@master"
