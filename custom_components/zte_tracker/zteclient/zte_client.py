@@ -111,12 +111,13 @@ _MODELS["F8748"] = {
     **_MODELS["F6640"],
     "parse_wan_traffic": True,
 }
-# Distinct model, not a plain F6640 alias: only this unit is confirmed to expose GPON optical diagnostics, so tag_pon_optical_* stays opt-in per model.
+# Distinct model, not a plain F6640 alias: only confirmed units expose GPON optical diagnostics, so tag_pon_optical_* stays opt-in per model.
 _MODELS["F6600P"] = {
     **_MODELS["F6640"],
     "tag_pon_optical_view": "ponopticalinfo&Menu3Location=0",
     "tag_pon_optical_data": "optical_info_lua.lua",
 }
+_MODELS["F6745Q"] = _MODELS["F6600P"]
 
 
 class zteClient:
@@ -271,7 +272,7 @@ class zteClient:
 
             # Parse XML response
             try:
-                xml_response = ET.fromstring(r.content)
+                xml_response = self._parse_response(r.content)
                 if xml_response.tag != "ajax_response_xml_root":
                     self.statusmsg = (
                         f"Unexpected response format from router: {xml_response.tag}"
@@ -673,7 +674,7 @@ class zteClient:
             router_details = {}
 
             # Parse XML response (see routers/RouterDetail.md)
-            xml = ET.fromstring(r.text)
+            xml = self._parse_response(r.text)
 
             # node OBJ_CPUMEMUSAGE_ID has CpuUsage1 to CpuUsage4, MemUsage.
             router_details.update(
@@ -701,6 +702,21 @@ class zteClient:
             # identifies the unit, it is of no use to the integration, and users
             # paste these attributes into public issues.
             devinfo = self._parse_instance(xml.find("OBJ_DEVINFO_ID/Instance"))
+            json_devinfo = self._json_instances(xml, "ModelName")
+            if not devinfo and json_devinfo:
+                # JSON firmwares (#106) rename the node and use the TR-181 field names.
+                devinfo = self._parse_instance(json_devinfo[0])
+                for src, dst in (
+                    ("HardwareVersion", "HardwareVer"),
+                    ("SoftwareVersion", "SoftwareVer"),
+                    ("Manufacturer", "ManuFacturer"),
+                ):
+                    if src in devinfo:
+                        devinfo[dst] = devinfo.pop(src)
+                if "PowerOnTime" not in router_details and isinstance(
+                    devinfo.get("UpTime"), int
+                ):
+                    router_details["PowerOnTime"] = devinfo["UpTime"]
             for field in ("ModelName", "HardwareVer", "SoftwareVer", "ManuFacturer"):
                 if devinfo.get(field):
                     router_details[field] = devinfo[field]
@@ -709,6 +725,55 @@ class zteClient:
         except Exception as e:
             _LOGGER.error("Error fetching router details: %s", e)
             return None
+
+    @staticmethod
+    def _parse_response(body: str | bytes) -> ET.Element:
+        """Parse a router response into the XML tree every parser expects; some firmwares answer the same endpoints in JSON (#106)."""
+        text = body.decode("utf-8", "replace") if isinstance(body, bytes) else body
+        if not text.lstrip().startswith(("{", "[")):
+            return ET.fromstring(body)
+        data = json.loads(text)
+        # Tagged so callers can fall back when the JSON node names differ from the XML ones.
+        root = ET.Element("ajax_response_xml_root", {"format": "json"})
+        if not isinstance(data, dict):
+            return root
+        for key, value in data.items():
+            node = ET.SubElement(root, str(key))
+            if not isinstance(value, dict):
+                if not isinstance(value, list) and value is not None:
+                    node.text = str(value)
+                continue
+            instances = value.get("Instance")
+            if isinstance(instances, dict):
+                instances = [instances]
+            if not isinstance(instances, list):
+                continue
+            for inst in instances:
+                if not isinstance(inst, dict):
+                    continue
+                params = inst.get("parameters")
+                if not isinstance(params, dict):
+                    params = {k: v for k, v in inst.items() if k != "path"}
+                elem = ET.SubElement(node, "Instance")
+                for name, val in [("_InstID", inst.get("path")), *params.items()]:
+                    if isinstance(val, (dict, list)):
+                        continue
+                    ET.SubElement(elem, "ParaName").text = str(name)
+                    ET.SubElement(elem, "ParaValue").text = (
+                        None if val is None else str(val)
+                    )
+        return root
+
+    @classmethod
+    def _json_instances(cls, xml: ET.Element, *fields: str) -> list[ET.Element]:
+        """Instances of a JSON response carrying any of `fields`, whatever their node is called."""
+        if xml.get("format") != "json":
+            return []
+        return [
+            inst
+            for inst in xml.iter("Instance")
+            if any(f in cls._parse_instance(inst, coerce_numeric=False) for f in fields)
+        ]
 
     @staticmethod
     def _parse_instance(node: Any, coerce_numeric: bool = True) -> dict[str, Any]:
@@ -750,7 +815,7 @@ class zteClient:
         r = self.session.get(url, verify=self.verify_ssl, timeout=10)
         r.raise_for_status()
         self.log_request(r)
-        xml = ET.fromstring(r.text)
+        xml = self._parse_response(r.text)
         error_str = xml.findtext("IF_ERRORSTR")
         if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
             raise Exception(f"Router error: {error_str}")
@@ -777,6 +842,25 @@ class zteClient:
             wan_status_root = self.paths.get("wan_status_root", "ID_WAN_COMFIG")
             instances = xml.findall(f"{wan_status_root}/Instance")
             if not instances:
+                instances = self._json_instances(xml, "WANCName", "ConnStatus")
+            tr181 = []
+            if not instances:
+                tr181 = [
+                    self._parse_instance(inst, coerce_numeric=False)
+                    for inst in self._json_instances(xml, "ConnectionStatus")
+                ]
+            if tr181:
+                # TR-181 JSON firmwares (#106): one instance per IP stack, prefer IPv4.
+                wan = next((p for p in tr181 if p.get("IPVersion") != "IPv6"), tr181[0])
+                wan_attrs["WAN_connected"] = wan["ConnectionStatus"] == "Connected"
+                if wan.get("IPAddress"):
+                    wan_attrs["WAN_public_ip"] = wan["IPAddress"]
+                if wan.get("RemoteGateway"):
+                    wan_attrs["WAN_gateway"] = wan["RemoteGateway"]
+                dns = [d for d in (wan.get("DNSServers") or "").split(",") if d]
+                if dns:
+                    wan_attrs["WAN_dns_servers"] = dns
+            elif not instances:
                 # Router answered SUCC but with an unexpected shape: report it instead of returning {}, which is what hid #75 on the entity.
                 wan_attrs["WAN_status_error"] = (
                     f"Router response had no <{wan_status_root}/Instance> data."
@@ -876,7 +960,7 @@ class zteClient:
         return wan_attrs
 
     def get_pon_optical_info(self) -> dict[str, Any]:
-        """Fetch GPON optical diagnostics. Model-gated: {} unless tag_pon_optical_* is set (F6600P only so far)."""
+        """Fetch GPON optical diagnostics. Model-gated: {} unless tag_pon_optical_* is set (F6600P, F6745Q)."""
         view_tag = self.paths.get("tag_pon_optical_view")
         data_tag = self.paths.get("tag_pon_optical_data")
         if not view_tag or not data_tag:
@@ -892,7 +976,7 @@ class zteClient:
             r = self.session.get(url, verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
             self.log_request(r)
-            xml = ET.fromstring(r.text)
+            xml = self._parse_response(r.text)
 
             error_str = xml.findtext("IF_ERRORSTR")
             if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
@@ -960,7 +1044,7 @@ class zteClient:
                 _LOGGER.warning("Empty XML response received")
                 return devices
 
-            xml = ET.fromstring(xml_response)
+            xml = self._parse_response(xml_response)
             if xml.tag != "ajax_response_xml_root":
                 _LOGGER.warning("Unexpected XML root tag: %s", xml.tag)
                 raise Exception("Invalid XML format")
@@ -986,6 +1070,13 @@ class zteClient:
                     wlanap_map[ap_id] = essid
 
             instances = xml.findall(f"{node_name}/Instance")
+            if not instances and xml.get("format") == "json":
+                instances = [
+                    inst
+                    for node in xml
+                    if node.tag != "OBJ_WLANAP_ID"
+                    for inst in node.findall("Instance")
+                ]
             _LOGGER.debug("Found %d device instances in XML", len(instances))
 
             for device in instances:
@@ -1017,7 +1108,9 @@ class zteClient:
                         if param_name and param_value:
                             pname = param_name.strip()
                             pvalue = param_value.strip()
-                            if pname == "MACAddress":
+                            if pname == "MACAddress" or (
+                                pname == "PhysAddress" and xml.get("format") == "json"
+                            ):
                                 device_info["MACAddress"] = pvalue.upper()
                             elif pname == "IPAddress":
                                 device_info["IPAddress"] = pvalue
@@ -1043,6 +1136,12 @@ class zteClient:
                                 except ValueError:
                                     device_info["ConnectTime"] = pvalue
                             elif pname == "AliasName":  # Contains the LAN port.
+                                device_info["Port"] = pvalue
+                            elif (
+                                pname in ("Layer1Interface", "SSID")
+                                and not device_info["Port"]
+                                and xml.get("format") == "json"
+                            ):
                                 device_info["Port"] = pvalue
 
                     except (IndexError, AttributeError) as e:
@@ -1145,7 +1244,7 @@ class zteClient:
             self.log_request(r)
             r.raise_for_status()
             # Check error in response.
-            xml = ET.fromstring(r.content)
+            xml = self._parse_response(r.content)
             error_str = xml.findtext("IF_ERRORSTR")
             if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
                 _LOGGER.error("Router error: %s", error_str)

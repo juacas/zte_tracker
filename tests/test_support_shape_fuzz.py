@@ -86,6 +86,21 @@ def _json_nested(rng, name, value):
     return json.dumps({"ad": {"1": {name: value}, "2": {name: value}}})
 
 
+def _json_zte_nodes(rng, name, value):
+    # The value sits in a later record only, which the list union now reads.
+    return json.dumps(
+        {
+            "PPP4.": {"Instance": [{"path": "a", "parameters": {"Other": 1}}]},
+            "DHCPv4.": {
+                "Instance": [
+                    {"path": "b", "parameters": {"Other": 2}},
+                    {"path": value, "parameters": {name: value}},
+                ]
+            },
+        }
+    )
+
+
 def _html(rng, name, value):
     return (
         f"<html><form action='/x/{value}/login?sn={value}'>"
@@ -106,6 +121,7 @@ BUILDERS = [
     _json_value,
     _json_key,
     _json_nested,
+    _json_zte_nodes,
     _html,
     _plain,
 ]
@@ -158,6 +174,8 @@ class TestNothingFromTheRouterComesBack(TestCase):
             "2101234567",
             "88.197.44.12",
             "nikos.dsl.example.gr",
+            "Nikos-PC.lan",
+            "desktop.home.",
         ):
             for body in (
                 f"<root><{('X' + value) if not value[0].isalpha() else value}>"
