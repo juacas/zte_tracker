@@ -4,6 +4,7 @@ Happy paths plus the scenarios that map to open upstream issues. Everything
 about "no value from the router comes back" lives in the fuzz property.
 """
 
+import json
 import time
 from unittest import TestCase
 
@@ -351,9 +352,7 @@ class TestOpenIssues(BundleTest):
                     200,
                     "text/html",
                 ),
-                "wan_ip_status_lua.lua": _Response(
-                    devices_xml("OBJ_WANLAN_ID", 1)
-                ),
+                "wan_ip_status_lua.lua": _Response(devices_xml("OBJ_WANLAN_ID", 1)),
             }
         )
         bundle = self.bundle(router)
@@ -384,7 +383,12 @@ class TestOpenIssues(BundleTest):
         )
         bundle = self.bundle(router)
 
-        for tag in ("login_entry", "logout_entry", "modeswitch_entry", "switchlang_entry"):
+        for tag in (
+            "login_entry",
+            "logout_entry",
+            "modeswitch_entry",
+            "switchlang_entry",
+        ):
             self.assertIn(tag, bundle["advertised_endpoints"])
             self.assertNotIn(f"discovered_{tag}", bundle["probes"])
 
@@ -512,6 +516,143 @@ class TestSufficiency(BundleTest):
         # One explanation, not two.
         self.assertEqual(list(bundle)[0], "ABOUT_THIS_FILE")
         self.assertNotIn("what_this_contains", bundle)
+
+
+# The reporter's wan_internetstatus_lua.lua from #106, addresses replaced.
+TR181_WAN = json.dumps(
+    {
+        "DHCPv6.": {"Instance": []},
+        "IF_ERRORID": 0,
+        "DHCPv4.": {
+            "Instance": [
+                {
+                    "parameters": {
+                        "IPMode": "DHCP",
+                        "RemoteGateway": "10.224.0.1",
+                        "MACAddress": "a4:e9:75:2b:1c:10",
+                        "IPAddress": "10.224.0.2",
+                        "Alias": "VOIX",
+                        "IPVersion": "IPv4",
+                    },
+                    "path": "DEV.IP.IF2",
+                }
+            ]
+        },
+        "PPP6.": {
+            "Instance": [
+                {
+                    "parameters": {
+                        "ConnectionStatus": "Unconfigured",
+                        "Alias": "INTERNET",
+                        "IPVersion": "IPv6",
+                    },
+                    "path": "DEV.PPP.IF1",
+                }
+            ]
+        },
+        "PPP4.": {
+            "Instance": [
+                {
+                    "parameters": {
+                        "ConnectionStatus": "Connected",
+                        "IPAddress": "88.197.44.12",
+                        "DNSServers": "88.197.44.1,88.197.44.2",
+                        "Alias": "INTERNET",
+                        "IPVersion": "IPv4",
+                    },
+                    "path": "DEV.PPP.IF1",
+                }
+            ]
+        },
+        "WANManager.WAN.": {
+            "Instance": [
+                {"path": "W1", "parameters": {"Alias": "INTERNET", "IPv4Mode": "ppp4"}},
+                {"path": "W2", "parameters": {"Alias": "VOIX", "IPv4Mode": "dhcp4"}},
+                {"path": "W3", "parameters": {"Alias": "INTERNET", "IPv6Mode": "ppp6"}},
+            ]
+        },
+        "IF_ERRORSTR": "SUCC",
+    }
+)
+
+
+class TestJsonDialect(BundleTest):
+    """#106: the bundle showed three WAN fields, none of them the connection state."""
+
+    def keys(self):
+        router = _Router(
+            {
+                "wan_internetstatus_lua.lua": _Response(
+                    TR181_WAN, 200, "application/json"
+                )
+            }
+        )
+        return self.bundle(router)["probes"]["F6640_wan"]["structure"]["keys"]
+
+    def params(self, keys, node):
+        return keys[node]["Instance"]["of"]["parameters"]
+
+    def test_node_names_are_kept(self):
+        self.assertTrue(
+            {"DHCPv4.", "DHCPv6.", "PPP4.", "PPP6.", "WANManager.WAN."}
+            <= set(self.keys())
+        )
+
+    def test_every_node_and_record_contributes_its_fields(self):
+        keys = self.keys()
+        self.assertEqual(
+            self.params(keys, "PPP4.")["ConnectionStatus"]["value"], "Connected"
+        )
+        self.assertEqual(
+            self.params(keys, "PPP6.")["ConnectionStatus"]["value"], "Unconfigured"
+        )
+        wan = self.params(keys, "WANManager.WAN.")
+        self.assertEqual(wan["IPv4Mode"]["values"], ["dhcp4", "ppp4"])
+        self.assertEqual(wan["IPv6Mode"]["value"], "ppp6")
+        self.assertEqual(keys["WANManager.WAN."]["Instance"]["list"], 3)
+
+    def test_the_envelope_keeps_its_value(self):
+        self.assertEqual(self.keys()["IF_ERRORSTR"]["value"], "SUCC")
+
+    def test_no_address_comes_back(self):
+        described = json.dumps(self.keys())
+        for value in ("10.224.0", "88.197.44", "a4:e9:75", "INTERNET", "VOIX"):
+            self.assertNotIn(value, described)
+
+    def test_a_field_only_a_later_record_carries_is_reported(self):
+        body = json.dumps({"list": [{"a": 1}, {"a": 2, "late": "x"}]})
+        router = _Router({"wan_internetstatus_lua.lua": _Response(body)})
+        keys = self.bundle(router)["probes"]["F6640_wan"]["structure"]["keys"]
+        self.assertIn("late", keys["list"]["of"])
+
+
+class TestRouterErrors(BundleTest):
+    def test_a_refusal_is_not_an_empty_endpoint(self):
+        timeout = (
+            "<ajax_response_xml_root><IF_ERRORSTR>SessionTimeout</IF_ERRORSTR>"
+            "<IF_ERRORID>1</IF_ERRORID></ajax_response_xml_root>"
+        )
+        router = _Router(
+            {
+                "wan_internetstatus_lua.lua": _Response(timeout),
+                "accessdev_landevs_lua.lua": _Response(EMPTY_XML),
+            }
+        )
+        analysis = self.bundle(router)["analysis"]
+        self.assertEqual(
+            analysis["endpoints_router_error"]["F6640_wan"], "SessionTimeout"
+        )
+        self.assertNotIn("F6640_wan", analysis["endpoints_answered_empty"])
+        self.assertIn("F6640_lan", analysis["endpoints_answered_empty"])
+        self.assertNotIn("F6640_lan", analysis["endpoints_router_error"])
+
+    def test_a_json_refusal_is_reported_too(self):
+        body = json.dumps({"IF_ERRORSTR": "SessionTimeout", "IF_ERRORTYPE": 200})
+        router = _Router({"wan_internetstatus_lua.lua": _Response(body)})
+        analysis = self.bundle(router)["analysis"]
+        self.assertEqual(
+            analysis["endpoints_router_error"], {"F6640_wan": "SessionTimeout"}
+        )
 
 
 class TestSafety(BundleTest):

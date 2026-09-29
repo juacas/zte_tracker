@@ -12,6 +12,10 @@ _SAFE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,48}$")
 _LONG_DIGITS = re.compile(r"\d{5,}")
 _BARE_MAC = re.compile(r"^[0-9A-Fa-f]{12}$")
 _SERIAL_LIKE = re.compile(r"^(?=.*\d)[A-Z0-9]{8,}$")
+# TR-181 object paths (PPP4., WANManager.WAN.) name nodes on JSON firmwares; capitalised segments keep dotted host names out.
+_DOTTED_NAME = re.compile(
+    r"^[A-Z][A-Za-z0-9_]{0,31}(?:\.[A-Z][A-Za-z0-9_]{0,31}){0,5}\.?$"
+)
 
 _SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("int", re.compile(r"^-?\d{1,18}$")),
@@ -28,6 +32,9 @@ _SHAPES: tuple[tuple[str, re.Pattern[str]], ...] = (
 MAX_FIELDS_PER_NODE = 60
 MAX_NODES = 40
 MAX_KEYS = 80
+# Records read per list or map when unioning their fields, and distinct enum values kept per field.
+MAX_RECORDS_SCANNED = 200
+MAX_ENUM_VALUES = 8
 
 
 def instance_count(structure: dict[str, Any]) -> int:
@@ -52,6 +59,21 @@ def instance_count(structure: dict[str, Any]) -> int:
     return walk(structure.get("keys"))
 
 
+_ENVELOPE_OK = frozenset({"SUCC", "SUCCESS", "OK"})
+
+
+def envelope_error(structure: dict[str, Any]) -> str | None:
+    """The IF_ERRORSTR a router answered with, when it is not success: SessionTimeout is a refusal, not an empty endpoint."""
+    if structure.get("format") == "xml":
+        envelope = (structure.get("nodes") or {}).get("<envelope>") or {}
+        field = (envelope.get("fields") or {}).get("IF_ERRORSTR")
+    else:
+        keys = structure.get("keys")
+        field = keys.get("IF_ERRORSTR") if isinstance(keys, dict) else None
+    value = field.get("value") if isinstance(field, dict) else None
+    return value if value and value not in _ENVELOPE_OK else None
+
+
 def node_names(structure: dict[str, Any]) -> list[str]:
     """The node or top level key names a response contained."""
     if structure.get("format") == "xml":
@@ -67,10 +89,12 @@ def node_names(structure: dict[str, Any]) -> list[str]:
 def safe_name(name: str) -> str:
     """Return the name if it is safe to print, else a description of it."""
     if (
-        _SAFE_NAME.match(name)
+        (_SAFE_NAME.match(name) or _DOTTED_NAME.match(name))
         and not _LONG_DIGITS.search(name)
-        and not _BARE_MAC.match(name)
-        and not _SERIAL_LIKE.match(name)
+        and not any(
+            _BARE_MAC.match(part) or _SERIAL_LIKE.match(part)
+            for part in name.split(".")
+        )
     ):
         return name
     return f"<name len={len(name)} digits={bool(_LONG_DIGITS.search(name))}>"
@@ -115,6 +139,17 @@ ENUM_FIELDS = frozenset(
         "if_errorid",
         "active",
         "enable",
+        # TR-181 JSON WAN dialect (#106).
+        "connectionstatus",
+        "ipversion",
+        "ipv4mode",
+        "ipv6mode",
+        "connectiontype",
+        "addressingtype",
+        # GPON uplink and registration state.
+        "wantype",
+        "regstatus",
+        "losinfo",
     }
 )
 _ENUM_VALUE = re.compile(r"^[A-Za-z0-9_.:+-]{1,16}$")
@@ -134,6 +169,53 @@ def _field(name: str, value: Any) -> dict[str, Any]:
     if is_sensitive_name(name):
         return {"shape": shape_of(value), "len": f"<{8 if len(text) < 8 else 64}"}
     return {"shape": shape_of(value), "len": len(text)}
+
+
+def _merge_field(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """One field seen in two records: keep every enum value, not just the first record's."""
+    out = dict(a)
+    if a.get("shape") != b.get("shape"):
+        out["shape"] = _merge(a.get("shape"), b.get("shape"))
+    if a.get("len") != b.get("len"):
+        lens = (a.get("len"), b.get("len"))
+        out["len"] = max(lens) if all(isinstance(x, int) for x in lens) else "<64"
+    values = sorted(
+        {
+            v
+            for f in (a, b)
+            for v in (f.get("values") or ([f["value"]] if "value" in f else []))
+        }
+    )
+    out.pop("value", None)
+    out.pop("values", None)
+    out.pop("values_truncated", None)
+    if len(values) == 1:
+        out["value"] = values[0]
+    elif values:
+        out["values"] = values[:MAX_ENUM_VALUES]
+        if len(values) > MAX_ENUM_VALUES or a.get("values_truncated"):
+            out["values_truncated"] = True
+    return out
+
+
+def _merge(a: Any, b: Any) -> Any:
+    """Union of two descriptions of like records, so a field only some records carry is still reported."""
+    if a == b or b is None:
+        return a
+    if a is None:
+        return b
+    if isinstance(a, dict) and isinstance(b, dict):
+        if "shape" in a and "shape" in b:
+            return _merge_field(a, b)
+        merged = dict(a)
+        for key, value in b.items():
+            merged[key] = _merge(merged[key], value) if key in merged else value
+        return merged
+    if isinstance(a, int) and isinstance(b, int):
+        return max(a, b)
+    if isinstance(a, str) and isinstance(b, str):
+        return "|".join(sorted(set(a.split("|")) | set(b.split("|"))))
+    return a
 
 
 def _describe_xml(root: ET.Element) -> dict[str, Any]:
@@ -169,8 +251,13 @@ def _describe_xml(root: ET.Element) -> dict[str, Any]:
                 if tag == "ParaName":
                     name = (child.text or "").strip()
                 elif tag == "ParaValue" and name is not None:
-                    entry["fields"].setdefault(
-                        safe_name(name), _field(name, child.text)
+                    key = safe_name(name)
+                    described = _field(name, child.text)
+                    fields = entry["fields"]
+                    fields[key] = (
+                        _merge_field(fields[key], described)
+                        if key in fields
+                        else described
                     )
                     name = None
                 elif tag not in ("ParaName", "ParaValue"):
@@ -187,6 +274,20 @@ def _describe_xml(root: ET.Element) -> dict[str, Any]:
     return {"format": "xml", "root": safe_name(root.tag), "nodes": nodes}
 
 
+def _describe_value(key: str, value: Any, depth: int) -> Any:
+    if not isinstance(value, (dict, list)) and key.casefold() in ENUM_FIELDS:
+        # The vue dialect carries the same dispatch literals in JSON.
+        return _field(key, value)
+    return _describe_json(value, depth)
+
+
+def _union(described: list[Any]) -> Any:
+    out = None
+    for item in described:
+        out = _merge(out, item)
+    return out
+
+
 def _describe_json(data: Any, depth: int = 0) -> Any:
     """Replace every value with its shape, and check every key."""
     if depth > 6:
@@ -195,29 +296,26 @@ def _describe_json(data: Any, depth: int = 0) -> Any:
         # A dictionary whose record shaped entries all describe identically is
         # a map of records, which means its keys are data rather than schema.
         records = {k: v for k, v in data.items() if isinstance(v, dict)}
+        # ZTE JSON nodes are {"<node>": {"Instance": [...]}}: their keys are schema, never collapsed away (#106).
+        zte_nodes = all(set(v) == {"Instance"} for v in records.values())
         # Two or more, not one.
-        if len(records) > 1:
-            described = [_describe_json(v, depth + 1) for v in records.values()]
+        if len(records) > 1 and not zte_nodes:
+            described = [
+                _describe_json(v, depth + 1)
+                for v in list(records.values())[:MAX_RECORDS_SCANNED]
+            ]
             fields = [set(d) if isinstance(d, dict) else set() for d in described]
             union = set().union(*fields) if fields else set()
             # Collapse on similar key sets, from one record upward.
             if union and all(len(f) * 2 >= len(union) for f in fields):
-                merged: dict[str, Any] = {}
-                for d in described:
-                    if isinstance(d, dict):
-                        merged.update(d)
-                # A collapsed map describes many records with one shape, so an
-                # enum value lifted from the first record would be presented as
-                for field, described_field in list(merged.items()):
-                    if isinstance(described_field, dict) and "value" in described_field:
-                        merged[field] = {
-                            k: v for k, v in described_field.items() if k != "value"
-                        }
-                collapsed: dict[str, Any] = {"map": len(records), "of": merged}
+                collapsed: dict[str, Any] = {
+                    "map": len(records),
+                    "of": _union([d for d in described if isinstance(d, dict)]),
+                }
                 for key, value in data.items():
                     if key not in records:
-                        collapsed[safe_name(str(key))] = _describe_json(
-                            value, depth + 1
+                        collapsed[safe_name(str(key))] = _describe_value(
+                            str(key), value, depth + 1
                         )
                 return collapsed
         out: dict[str, Any] = {}
@@ -228,19 +326,17 @@ def _describe_json(data: Any, depth: int = 0) -> Any:
             name = safe_name(str(key))
             if name.startswith("<") and name in out:
                 name = f"{name[:-1]} #{len(out)}>"
-            if (
-                not isinstance(value, (dict, list))
-                and str(key).casefold() in ENUM_FIELDS
-            ):
-                # The vue dialect carries the same dispatch literals in JSON.
-                out[name] = _field(str(key), value)
-            else:
-                out[name] = _describe_json(value, depth + 1)
+            out[name] = _describe_value(str(key), value, depth + 1)
         return out
     if isinstance(data, list):
         if not data:
             return {"list": 0}
-        return {"list": len(data), "of": _describe_json(data[0], depth + 1)}
+        return {
+            "list": len(data),
+            "of": _union(
+                [_describe_json(item, depth + 1) for item in data[:MAX_RECORDS_SCANNED]]
+            ),
+        }
     return shape_of(data)
 
 

@@ -8,7 +8,13 @@ import time
 from datetime import datetime
 from typing import Any
 
-from .support_shape import describe, instance_count, node_names, safe_name
+from .support_shape import (
+    describe,
+    envelope_error,
+    instance_count,
+    node_names,
+    safe_name,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,6 +92,9 @@ def _analyse(bundle: dict[str, Any]) -> dict[str, Any]:
             "source": entry.get("source", "profile"),
             "format": structure.get("format"),
         }
+        router_error = envelope_error(structure)
+        if router_error:
+            per_probe[name]["router_error"] = router_error
 
     # A profile is judged by what its own lan and wlan probes returned. The
     # owners map exists because the matrix deduplicates: a shared endpoint is
@@ -129,7 +138,14 @@ def _analyse(bundle: dict[str, Any]) -> dict[str, Any]:
             if summary["status"] == 200
             and summary["instances"] == 0
             and summary["format"] not in ("html", "empty", "unrecognised")
+            and "router_error" not in summary
         ),
+        # Refused, not empty: SessionTimeout here usually means the data tag needs its view page requested first (#75).
+        "endpoints_router_error": {
+            name: summary["router_error"]
+            for name, summary in sorted(per_probe.items())
+            if "router_error" in summary
+        },
         "probes": per_probe,
     }
 
