@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.2.0
+
+- fix: stop the release notes saying the same thing three times (#103)
+- Harden the release pipeline: only finish our own release pull request, and validate it before it reaches master (#104)
+- ci: stop HACS Action running twice for every pull request (#105)
+- test: raise coverage to 90% (#108)
+- fix: parse JSON responses from F6745Q firmware (#106) (#109)
+
 ## v2.1.1
 
 - Fix reboot on ZTE H2640 (firmware PMZHP_1.0.4) (#79)
