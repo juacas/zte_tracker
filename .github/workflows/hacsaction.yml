@@ -12,6 +12,8 @@ jobs:
   hacs:
     name: HACS Action
     runs-on: "ubuntu-latest"
+    # The release pull request runs its own HACS validation and merges before this can finish.
+    if: ${{ !startsWith(github.head_ref, 'chore/release-') && !startsWith(github.ref_name, 'chore/release-') }}
     steps:
       - uses: "actions/checkout@v5"
       - name: HACS Action
