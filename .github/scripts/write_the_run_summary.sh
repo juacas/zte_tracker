@@ -52,12 +52,16 @@ esac
   printf '| | |\n|---|---|\n'
   if [ "$dry_run" = "true" ]; then
     printf '| Would release | %s |\n' "${planned_version:-nothing, this run does not bump a version}"
-    printf '| Current version | %s |\n' "${manifest_version:-unknown}"
+    if [ "$prerelease" = "true" ]; then
+      printf '| Prerelease tree version | %s |\n' "${manifest_version:-unknown}"
+    else
+      printf '| Current version | %s |\n' "${manifest_version:-unknown}"
+    fi
   else
     printf '| Version | %s |\n' "${tag_name:-none, this run does not bump a version}"
   fi
   printf '| Outcome | %s |\n' "$outcome"
-  if [ -n "$target_sha" ]; then printf '| Commit | `%s` |\n' "${target_sha:0:12}"; fi
+  if [ -n "$target_sha" ]; then printf "| Commit | \`%s\` |\n" "${target_sha:0:12}"; fi
   if [ "$prerelease" = "true" ]; then printf '| Prerelease | yes |\n'; fi
   if [ -n "$pr_url" ]; then printf '| Release pull request | %s |\n' "$pr_url"; fi
   printf '| Started with | %s |\n' "$settings"

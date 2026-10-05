@@ -3,7 +3,7 @@
 # Outputs: changelog_version, dry_run, manifest_version, prerelease, should_publish, should_tag, tag_name, tag_state, target_sha
 set -euo pipefail
 
-for name in DRY_RUN GH_TOKEN GITHUB_OUTPUT GITHUB_REPOSITORY MODE PREPARED_SHA TARGET_SHA_INPUT; do
+for name in BUMP_INPUT DRY_RUN GH_TOKEN GITHUB_OUTPUT GITHUB_REPOSITORY MODE PREPARED_SHA TARGET_SHA_INPUT; do
   [ -n "${!name+x}" ] || { echo "Missing required environment variable: $name" >&2; exit 1; }
 done
 case "$MODE" in
@@ -11,6 +11,7 @@ case "$MODE" in
   *) echo "Unsupported release mode: $MODE" >&2; exit 1 ;;
 esac
 case "$DRY_RUN" in true|false) ;; *) echo "Invalid dry_run value: $DRY_RUN" >&2; exit 1 ;; esac
+export SCRATCH="${RUNNER_TEMP:-$PWD}"
 # Only a run that writes a new changelog section can carry the notes, so say so rather than dropping them in silence.
 if [ -n "${RELEASE_NOTES:-}" ] && [ "${NOTES_WRITTEN:-}" != "true" ]; then
   echo "::warning::release_notes was ignored: this run did not write a new changelog section."
@@ -30,6 +31,12 @@ release_exists() {
     *) echo "Cannot tell whether $1 is already released: $draft" >&2; exit 1 ;;
   esac
 }
+
+if [ "$MODE" = "rc" ] && [ -n "$TARGET_SHA_INPUT" ]; then
+  echo "target_sha cannot be combined with rc mode." >&2
+  exit 1
+fi
+
 if [ -n "$TARGET_SHA_INPUT" ]; then
   if [[ ! "$TARGET_SHA_INPUT" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
     echo "target_sha must be a commit SHA." >&2
@@ -58,34 +65,60 @@ if ! git merge-base --is-ancestor "$TARGET_SHA" refs/remotes/origin/master; then
   echo "target_sha must be reachable from master." >&2
   exit 1
 fi
+
 # Never check out the target: this script may not exist at that commit.
-MANIFEST_VERSION=$(git show "${TARGET_SHA}:custom_components/zte_tracker/manifest.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
-if [[ ! "$MANIFEST_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Malformed manifest version: $MANIFEST_VERSION" >&2
+SOURCE_MANIFEST_VERSION=$(git show "${TARGET_SHA}:custom_components/zte_tracker/manifest.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+if [[ ! "$SOURCE_MANIFEST_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Malformed manifest version: $SOURCE_MANIFEST_VERSION" >&2
   exit 1
 fi
 
 PRERELEASE=false
-CHANGELOG_VERSION="$MANIFEST_VERSION"
+CHANGELOG_VERSION="$SOURCE_MANIFEST_VERSION"
+MANIFEST_VERSION="$SOURCE_MANIFEST_VERSION"
 if [ "$MODE" = "rc" ]; then
-  # An rc tags the tree as it is, so manifest.json would still name the previous version and a tester could not
-  # tell what they installed. Refused until the rc path writes the manifest too.
-  echo "rc mode is disabled: it would tag the next patch while the tree still says $MANIFEST_VERSION." >&2
-  echo "Release a stable version, or ask for the rc path to bump the manifest before this is used." >&2
-  exit 1
   PRERELEASE=true
-  VERSION_BODY=${MANIFEST_VERSION#v}
-  IFS=. read -r MAJOR MINOR PATCH <<EOF_VERSION
-$VERSION_BODY
-EOF_VERSION
-  NEXT_PATCH=$((PATCH + 1))
-  CHANGELOG_VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+  # The plan reads manifest and tags from this checkout, so it must be the commit being tagged.
+  if [ "$(git rev-parse HEAD)" != "$TARGET_SHA" ]; then
+    echo "master moved while the rc was being planned. Start Auto Release again." >&2
+    exit 1
+  fi
+  RC_PLAN_OUTPUT="$SCRATCH/rc-plan.out"
+  : > "$RC_PLAN_OUTPUT"
+  GITHUB_OUTPUT="$RC_PLAN_OUTPUT" .github/scripts/work_out_the_next_version.sh
+  RC_BASE_VERSION=$(sed -n 's/^next_version=//p' "$RC_PLAN_OUTPUT" | tail -n1)
+  if [ -z "$RC_BASE_VERSION" ]; then
+    echo "No commits since the latest stable release. Nothing to prerelease."
+    TAG_NAME=""
+    SHOULD_TAG=false
+    SHOULD_PUBLISH=false
+    TAG_STATE=no-changes
+    {
+      printf 'tag_name=%s\n' "$TAG_NAME"
+      printf 'changelog_version=%s\n' "$CHANGELOG_VERSION"
+      printf 'manifest_version=%s\n' "$MANIFEST_VERSION"
+      printf 'prerelease=%s\n' "$PRERELEASE"
+      printf 'dry_run=%s\n' "$DRY_RUN"
+      printf 'should_tag=%s\n' "$SHOULD_TAG"
+      printf 'should_publish=%s\n' "$SHOULD_PUBLISH"
+      printf 'tag_state=%s\n' "$TAG_STATE"
+      printf 'target_sha=%s\n' "$TARGET_SHA"
+    } >> "$GITHUB_OUTPUT"
+    exit 0
+  fi
+  CHANGELOG_VERSION="$RC_BASE_VERSION"
   RC_PREFIX="${CHANGELOG_VERSION}-rc"
-  EXISTING_COUNT=$(git for-each-ref --format='%(refname:strip=2)' "refs/tags/${RC_PREFIX}.*" | grep -Ec "^${RC_PREFIX//./\\.}\\.[0-9]+$" || true)
-  LAST_RC_NUMBER=$(git for-each-ref --format='%(refname:strip=2)' "refs/tags/${RC_PREFIX}.*" | sed -nE "s/^${RC_PREFIX//./\\.}\\.([0-9]+)$/\\1/p" | sort -n | tail -n1)
-  TAG_NAME="${RC_PREFIX}.$((${LAST_RC_NUMBER:-0} + 1))"
+  LAST_RC_TAG=$(git tag --list "${RC_PREFIX}[0-9]*" | sed -nE "s/^(${RC_PREFIX//./\\.}[0-9]+)$/\\1/p" | sort -V | tail -n1)
+  EXISTING_COUNT=$(git tag --list "${RC_PREFIX}[0-9]*" | sed -nE "s/^${RC_PREFIX//./\\.}([0-9]+)$/\\1/p" | wc -l | tr -d ' ')
+  LAST_RC_NUMBER=$(printf '%s\n' "$LAST_RC_TAG" | sed -nE "s/^${RC_PREFIX//./\\.}([0-9]+)$/\\1/p")
+  if [ -n "$LAST_RC_TAG" ] && ! release_exists "$LAST_RC_TAG"; then
+    TAG_NAME="$LAST_RC_TAG"
+  else
+    TAG_NAME="${RC_PREFIX}$(( ${LAST_RC_NUMBER:-0} + 1 ))"
+  fi
+  MANIFEST_VERSION="$TAG_NAME"
   # HACS only looks at the newest 30 releases, so a long rc run can bury the last stable one.
-  if [ "$EXISTING_COUNT" -ge 25 ]; then
+  if [ "$EXISTING_COUNT" -ge 25 ] && [ "$TAG_NAME" != "$LAST_RC_TAG" ]; then
     echo "Refusing another RC: publish a stable release before approaching HACS's 30-release window." >&2
     exit 1
   fi
@@ -108,7 +141,40 @@ fi
 if git rev-parse --verify --quiet "refs/tags/${TAG_NAME}" >/dev/null; then
   SHOULD_TAG=false
   TAG_COMMIT=$(git rev-list -n 1 "$TAG_NAME")
-  if [ "$TAG_COMMIT" = "$TARGET_SHA" ]; then
+  if [ "$MODE" = "rc" ]; then
+    TAG_MANIFEST=$(git show "${TAG_COMMIT}:custom_components/zte_tracker/manifest.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+    TAG_PARENT=$(git rev-list --parents -n 1 "$TAG_COMMIT" | awk '{print $2}')
+    TAG_SUBJECT=$(git show -s --format=%s "$TAG_COMMIT")
+    TAG_AUTHOR=$(git show -s --format='%an <%ae>' "$TAG_COMMIT")
+    if [ "$TAG_MANIFEST" != "$TAG_NAME" ]; then
+      echo "Tag $TAG_NAME sits on a tree whose manifest says $TAG_MANIFEST. Refusing." >&2
+      exit 1
+    fi
+    if ! git merge-base --is-ancestor "$TAG_PARENT" refs/remotes/origin/master; then
+      echo "Tag $TAG_NAME is based on $TAG_PARENT, which does not come from master." >&2
+      exit 1
+    fi
+    if [ "$TAG_SUBJECT" != "chore(release): prepare ${TAG_NAME}" ]; then
+      echo "Tag $TAG_NAME does not point at an Auto Release prerelease commit." >&2
+      exit 1
+    fi
+    if [ "$TAG_AUTHOR" != "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" ]; then
+      echo "Tag $TAG_NAME was not authored by github-actions[bot]." >&2
+      exit 1
+    fi
+    if release_exists "$TAG_NAME"; then
+      echo "Version $TAG_NAME was already released at $TAG_COMMIT."
+      SHOULD_PUBLISH=false
+      TAG_STATE=already-released
+    else
+      echo "Tag $TAG_NAME exists at $TAG_COMMIT but no release was published. Resuming publication."
+      SHOULD_PUBLISH=true
+      TAG_STATE=orphan-tag
+      TARGET_SHA="$TAG_COMMIT"
+      MANIFEST_VERSION="$TAG_MANIFEST"
+      CHANGELOG_VERSION="$TAG_MANIFEST"
+    fi
+  elif [ "$TAG_COMMIT" = "$TARGET_SHA" ]; then
     if release_exists "$TAG_NAME"; then
       echo "Tag already points at this commit and its release is published, nothing to do."
       SHOULD_PUBLISH=false
@@ -130,8 +196,7 @@ if git rev-parse --verify --quiet "refs/tags/${TAG_NAME}" >/dev/null; then
       # Validate and publish the tagged tree, not master's newer head.
       TARGET_SHA="$TAG_COMMIT"
       TAG_MANIFEST=$(git show "${TARGET_SHA}:custom_components/zte_tracker/manifest.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
-      # An rc tag name never equals the manifest version, so only stable can be checked this way.
-      if [ "$MODE" = "stable" ] && [ "$TAG_MANIFEST" != "$TAG_NAME" ]; then
+      if [ "$TAG_MANIFEST" != "$TAG_NAME" ]; then
         echo "Tag $TAG_NAME sits on a tree whose manifest says $TAG_MANIFEST. Refusing." >&2
         exit 1
       fi

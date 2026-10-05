@@ -130,7 +130,7 @@ jobs:
           TAG="${TAG_NAME}"
           # This version's section only: the whole file used to be pasted in.
           CHANGELOG_CONTENT=$(awk -v tag="${TAG}" '
-            function norm(s) { sub(/ +-.*$/, "", s); gsub(/[][]/, "", s); sub(/-rc\.[0-9]+$/, "", s); sub(/^v/, "", s); return s }
+            function norm(s) { sub(/ +-.*$/, "", s); gsub(/[][]/, "", s); sub(/-rc\.?[0-9]+$/, "", s); sub(/^v/, "", s); return s }
             /^## / {
               if (found) exit
               hdr = $0; sub(/^## +/, "", hdr)

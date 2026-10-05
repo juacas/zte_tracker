@@ -12,7 +12,13 @@ fi
 {
   printf 'Dry run only. No tag, release, asset, or repository write was created.\n'
   if [ -n "$PLANNED_VERSION" ]; then
-    printf 'A real run would release %s. Nothing was bumped here, so every field below describes master as it stands today, which is why it can report the current version as already released.\n' "$PLANNED_VERSION"
+    if [ "$PRERELEASE" = "true" ] && [ "$TAG_STATE" = "orphan-tag" ]; then
+      printf 'A real run would publish the existing prerelease tag %s without moving it.\n' "$PLANNED_VERSION"
+    elif [ "$PRERELEASE" = "true" ]; then
+      printf 'A real run would release %s from a throwaway prerelease tree based on master.\n' "$PLANNED_VERSION"
+    else
+      printf 'A real run would release %s. Nothing was bumped here, so every field below describes master as it stands today, which is why it can report the current version as already released.\n' "$PLANNED_VERSION"
+    fi
   fi
   printf 'planned_version=%s\n' "${PLANNED_VERSION:-none, this run does not bump a version}"
   printf 'target_sha=%s\n' "$TARGET_SHA"

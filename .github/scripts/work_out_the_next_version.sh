@@ -36,7 +36,11 @@ fi
 LAST_STABLE_TAG=$(git for-each-ref --merged HEAD --format='%(refname:strip=2)' refs/tags | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
 if [ -n "$LAST_STABLE_TAG" ] && [ "$LAST_STABLE_TAG" != "$MANIFEST_VERSION" ]; then
   echo "master already carries unreleased $MANIFEST_VERSION over tag $LAST_STABLE_TAG. Publishing that instead of bumping."
-  printf 'should_prepare=false\n' >> "$GITHUB_OUTPUT"
+  {
+    printf 'should_prepare=false\n'
+    printf 'next_version=%s\n' "$MANIFEST_VERSION"
+    printf 'base_version=%s\n' "$LAST_STABLE_TAG"
+  } >> "$GITHUB_OUTPUT"
   exit 0
 fi
 
