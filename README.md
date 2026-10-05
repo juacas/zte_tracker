@@ -183,6 +183,7 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 | ZTE F6745Q  |     F6745Q      |    ✅    |
 | ZTE F6600P  |     F6600P      |    ✅    |
 | ZTE F8748   |      F8748      |    ✅    |
+| ZTE H168A V2.1 |     H168A      |    ✅    |
 | ZTE H169A     |      H169A      |    ✅    |
 | ZTE H2640     |      H2640      |    ✅    |
 | ZTE H288A     |      H288A      |    ✅    |
@@ -393,6 +394,7 @@ pytest custom_components/zte_tracker/tests/
 - **@LZDEROH** for AX3000 verification
 - **@gradypark86** for SR7410 verification
 - **@LeMehdi0** for F6745Q support bundle (#106)
+- **@enisyugnak** for H168A support bundle (#112)
 
 
 ## 📄 License
@@ -493,7 +495,7 @@ Below are the actual URL sequences used by the integration for the most common Z
   1. `GET  https://[router_ip]/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_=[guid]`
   2. `POST https://[router_ip]/?_type=menuData&_tag=devmgr_restartmgr_lua.lua&_=[guid]` (with encrypted digest and session token)
 
-#### **H288A / H169A / H388X / H2640 / H3600P / H6645P / H3640**
+#### **H288A / H169A / H168A / H388X / H2640 / H3600P / H6645P / H3640**
 
 - **WiFi Devices:**
   `GET https://[router_ip]/?_type=menuData&_tag=accessdev_ssiddev_lua.lua&_=[guid]`

@@ -42,6 +42,7 @@ KNOWN_NODES = frozenset(
     {
         "OBJ_WLAN_AD_ID",  # F6640 wlan_id_element
         "OBJ_ACCESSDEV_ID",  # F6640/H288A/H388X lan, H288A/H388X wlan
+        "OBJ_LOCALNETWORK_STATUS_ACCESSDEV_ID",  # H168A lan/wlan_id_element
         "OBJ_CLIENTS_ID",  # E2631 wlan_id_element
         "OBJ_LAN_INFO_ID",  # E2631 lan_id_element
         "OBJ_DEVINFO_ID",  # get_router_details
