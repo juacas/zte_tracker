@@ -80,6 +80,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         self._last_device_count = 0
         self._stable_count = 0
         self._device_cache: dict[str, dict[str, Any]] = {}
+        self._parental_controls_cache: list[dict[str, Any]] = []
         self._last_successful_update: datetime | None = None
         self._last_login_at: datetime | None = None
         self._client_lock = asyncio.Lock()
@@ -305,6 +306,71 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
         return processed_devices
 
+    @staticmethod
+    def _copy_parental_controls(
+        parental_controls: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Copy parental-control rows so entities never mutate shared state."""
+        return [dict(rule) for rule in (parental_controls or [])]
+
+    async def async_set_parental_control_enabled(
+        self, inst_id: str, enabled: bool
+    ) -> bool:
+        """Toggle one router-side parental-control rule and re-read its state."""
+
+        def _set_parental_control() -> list[dict[str, Any]] | None:
+            had_session = (
+                self.client.login_data is not None
+                and self.client.session is not None
+                and self._last_login_at is not None
+            )
+            try:
+                if not self.client.login():
+                    _LOGGER.warning(
+                        "Parental-control update login failed: %s@%s",
+                        self.client.username,
+                        self.client.host,
+                    )
+                    return None
+                if not had_session:
+                    self._last_login_at = datetime.now()
+                if not self.client.set_parental_control_enabled(inst_id, enabled):
+                    return None
+                return self.client.get_parental_controls()
+            finally:
+                if not self._reuse_session:
+                    try:
+                        self.client.logout()
+                    except Exception:
+                        pass
+                    self._last_login_at = None
+
+        async with self._client_lock:
+            parental_controls = await self.hass.async_add_executor_job(
+                _set_parental_control
+            )
+
+        if not parental_controls:
+            return False
+
+        match = next(
+            (
+                rule
+                for rule in parental_controls
+                if str(rule.get("id")) == inst_id
+            ),
+            None,
+        )
+        if match is None:
+            return False
+
+        copied = self._copy_parental_controls(parental_controls)
+        self._parental_controls_cache = copied
+        data = dict(self.data or {})
+        data["parental_controls"] = self._copy_parental_controls(copied)
+        self.async_set_updated_data(data)
+        return bool(match.get("enabled")) == enabled
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from the router."""
         if self._paused:
@@ -319,12 +385,16 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                     "model": self.client.model,
                     "status": "paused",
                 },
+                "parental_controls": self._copy_parental_controls(
+                    self._parental_controls_cache
+                ),
             }
 
         def _fetch_router_data_legacy() -> tuple[
             list[dict[str, Any]] | None,
             dict[str, Any] | None,
             dict[str, Any] | None,
+            list[dict[str, Any]],
         ]:
             """Original upstream fetch path: login -> fetch -> logout per poll.
 
@@ -337,11 +407,16 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                     _LOGGER.warning(
                         "Login failed: %s@%s", self.client.username, self.client.host
                     )
-                    return None, None, None
+                    return None, None, None, []
 
                 devices = self.client.get_devices_response()
                 wanstatus = self.client.get_wan_status()
                 routerdetails = self.client.get_router_details()
+                try:
+                    parental_controls = self.client.get_parental_controls()
+                except Exception as ex:
+                    _LOGGER.warning("Failed to fetch parental controls: %s", ex)
+                    parental_controls = []
 
                 # Mesh topology enrichment (before logout!)
                 if devices is not None and self._mesh_topology:
@@ -349,10 +424,10 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                     if topo:
                         devices = self._enrich_topology(topo, devices)
 
-                return devices, wanstatus, routerdetails
+                return devices, wanstatus, routerdetails, parental_controls
             except Exception as ex:
                 _LOGGER.error("Error fetching device data: %s", ex)
-                return None, None, None
+                return None, None, None, []
             finally:
                 try:
                     self.client.logout()
@@ -363,6 +438,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             list[dict[str, Any]] | None,
             dict[str, Any] | None,
             dict[str, Any] | None,
+            list[dict[str, Any]],
         ]:
             """Session-reuse fetch path (opt-in via the session_reuse option).
 
@@ -397,6 +473,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 list[dict[str, Any]] | None,
                 dict[str, Any] | None,
                 dict[str, Any] | None,
+                list[dict[str, Any]],
                 bool,
             ]:
                 try:
@@ -415,13 +492,13 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                                 self.client.username,
                                 self.client.host,
                             )
-                            return None, None, None, False
+                            return None, None, None, [], False
                         _LOGGER.debug("Fresh router login established")
                         self._last_login_at = datetime.now()
 
                     devices = self.client.get_devices_response()
                     if devices is None:
-                        return None, None, None, False
+                        return None, None, None, [], False
 
                     # Stale-session safety net: if we reused a cached session
                     # and got back an empty device list, the router likely
@@ -434,10 +511,15 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug(
                             "Empty device list on reused session; treating as stale"
                         )
-                        return None, None, None, False
+                        return None, None, None, [], False
 
                     wanstatus = self.client.get_wan_status()
                     routerdetails = self.client.get_router_details()
+                    try:
+                        parental_controls = self.client.get_parental_controls()
+                    except Exception as ex:
+                        _LOGGER.warning("Failed to fetch parental controls: %s", ex)
+                        parental_controls = []
 
                     # Mesh topology enrichment (session still alive)
                     if devices is not None and self._mesh_topology:
@@ -445,12 +527,12 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                         if topo:
                             devices = self._enrich_topology(topo, devices)
 
-                    return devices, wanstatus, routerdetails, True
+                    return devices, wanstatus, routerdetails, parental_controls, True
                 except Exception as ex:
                     _LOGGER.debug("Fetch attempt error: %s", ex, exc_info=True)
-                    return None, None, None, False
+                    return None, None, None, [], False
 
-            devices, wanstatus, routerdetails, ok = _attempt()
+            devices, wanstatus, routerdetails, parental_controls, ok = _attempt()
 
             if not ok:
                 _LOGGER.debug(
@@ -461,7 +543,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 except Exception:
                     pass
                 self._last_login_at = None
-                devices, wanstatus, routerdetails, ok = _attempt()
+                devices, wanstatus, routerdetails, parental_controls, ok = _attempt()
                 if not ok:
                     _LOGGER.warning(
                         "Login/fetch failed after retry: %s@%s",
@@ -475,16 +557,19 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                         pass
                     self._last_login_at = None
 
-            return devices, wanstatus, routerdetails
+            return devices, wanstatus, routerdetails, parental_controls
 
         _fetch_router_data = (
             _fetch_router_data_reuse if self._reuse_session else _fetch_router_data_legacy
         )
 
         async with self._client_lock:
-            devices, wanstatus, routerdetails = await self.hass.async_add_executor_job(
-                _fetch_router_data
-            )
+            (
+                devices,
+                wanstatus,
+                routerdetails,
+                parental_controls,
+            ) = await self.hass.async_add_executor_job(_fetch_router_data)
 
         if devices is None:
             self._available = False
@@ -508,11 +593,15 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                     "model": self.client.model,
                     "status": "unavailable",
                 },
+                "parental_controls": self._copy_parental_controls(
+                    self._parental_controls_cache
+                ),
             }
 
         # Have info to return. Tracker is working.
         self._available = True
         self._last_successful_update = datetime.now()
+        self._parental_controls_cache = self._copy_parental_controls(parental_controls)
 
         # Process devices with caching
         processed_devices = self._merge_device_data(devices)
@@ -536,4 +625,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         return {
             "devices": processed_devices,
             "router_info": router_info,
+            "parental_controls": self._copy_parental_controls(
+                self._parental_controls_cache
+            ),
         }
