@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -49,6 +49,7 @@ def _coordinator(devices: dict | None = None, router_info: dict | None = None):
         },
     }
     coordinator.last_update_success = True
+    coordinator.update_interval = timedelta(seconds=60)
     coordinator.async_add_listener = Mock(return_value=lambda: None)
     coordinator.async_request_refresh = AsyncMock()
     coordinator.async_reboot_router = AsyncMock(return_value=True)
@@ -163,6 +164,7 @@ async def test_sensor_setup_and_properties(mock_hass) -> None:
         attrs = router_sensor.extra_state_attributes
     assert attrs["status"] == "connected"
     assert attrs["last_update"] == "2026-01-01T10:30:00"
+    assert attrs["poll_interval"] == 60
 
     assert count_sensor.native_value == 1
     assert count_sensor.extra_state_attributes == {

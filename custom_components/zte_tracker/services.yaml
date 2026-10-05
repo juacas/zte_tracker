@@ -10,6 +10,17 @@ reboot:
       selector:
         text: {}
 
+refresh:
+  name: Refresh ZTE Router
+  description: Polls the router now instead of waiting for the next interval. Rate limited to one poll every 10 seconds.
+  fields:
+    host:
+      name: Host
+      description: Only refresh this router. Omit to refresh all configured routers.
+      required: false
+      selector:
+        text: {}
+
 remove_tracked_entity:
   name: Remove Tracked Device Entity
   description: Removes a tracked device entity by MAC address. If the device becomes orphaned, it will be removed as well.

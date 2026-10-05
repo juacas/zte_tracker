@@ -77,7 +77,12 @@ class ZteRouterSensor(ZteBaseSensor):
         data = self.coordinator.data or {}
         router_info = data.get("router_info", {})
         # Return a copy to avoid mutating shared coordinator.data
-        return {**router_info, "last_update": ha_dt.now().isoformat()}
+        interval = self.coordinator.update_interval
+        return {
+            **router_info,
+            "last_update": ha_dt.now().isoformat(),
+            "poll_interval": int(interval.total_seconds()) if interval else None,
+        }
 
 
 class ZteDeviceCountSensor(ZteBaseSensor):

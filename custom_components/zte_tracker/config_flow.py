@@ -10,20 +10,28 @@ from typing import Any
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, section
+from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 from .const import (
+    ADAPTIVE_FAST,
+    ADAPTIVE_RELAXED,
+    CONF_JOIN_REFRESH,
     CONF_MESH_TOPOLOGY,
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
+    CONF_SCAN_INTERVAL,
     CONF_SESSION_REUSE,
+    DEFAULT_JOIN_REFRESH,
     DEFAULT_HOST,
     DEFAULT_MESH_TOPOLOGY,
     DEFAULT_PASSWORD,
     DEFAULT_QUERY_ROUTER_DETAILS,
     DEFAULT_QUERY_WAN_STATUS,
+    DEFAULT_SCAN_INTERVAL,
+    SCAN_INTERVAL_PRESETS,
     DEFAULT_SESSION_REUSE,
     DEFAULT_USERNAME,
     DOMAIN,
@@ -179,6 +187,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input[CONF_PASSWORD] = validate_password(user_input[CONF_PASSWORD])
             except vol.Invalid as ex:
                 errors[CONF_PASSWORD] = "invalid_password"
+
             if not errors:
                 try:
                     info = await validate_input(self.hass, user_input)
@@ -257,6 +266,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Manage the options flow."""
         errors: dict[str, str] = {}
+        if user_input is not None:
+            user_input = _flatten_sections(user_input)
 
         # Current values, used both as form defaults and as the comparison
         # baseline to decide whether router credentials/host changed and thus
@@ -289,6 +300,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_MESH_TOPOLOGY, DEFAULT_MESH_TOPOLOGY
             ),
         )
+        current_scan_interval = self._config_entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+        current_join_refresh = self._config_entry.options.get(
+            CONF_JOIN_REFRESH, DEFAULT_JOIN_REFRESH
+        )
 
         if user_input is not None:
             new_host = user_input.get(CONF_HOST, current_host)
@@ -313,6 +330,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 new_password = validate_password(new_password)
             except vol.Invalid:
                 errors[CONF_PASSWORD] = "invalid_password"
+            new_scan_interval = _parse_scan_interval(
+                user_input.get(CONF_SCAN_INTERVAL), current_scan_interval
+            )
 
             if not errors:
                 # Only test the router when credentials/host actually changed
@@ -394,6 +414,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             )
                         ),
                     }
+                    # Keep the stored options identical to earlier versions
+                    # unless a live-refresh option differs from its default.
+                    if new_scan_interval != DEFAULT_SCAN_INTERVAL:
+                        options_payload[CONF_SCAN_INTERVAL] = new_scan_interval
+                    if user_input.get(CONF_JOIN_REFRESH, current_join_refresh):
+                        options_payload[CONF_JOIN_REFRESH] = True
                     return self.async_create_entry(title="", data=options_payload)
 
             # Re-render with submitted values so the user does not have to
@@ -411,25 +437,113 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             current_mesh_topology = bool(
                 user_input.get(CONF_MESH_TOPOLOGY, current_mesh_topology)
             )
+            current_scan_interval = new_scan_interval
+            current_join_refresh = bool(
+                user_input.get(CONF_JOIN_REFRESH, current_join_refresh)
+            )
 
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_HOST, default=current_host): cv.string,
-                vol.Required(CONF_USERNAME, default=current_username): cv.string,
-                vol.Required(CONF_PASSWORD, default=current_password): cv.string,
-                vol.Required(CONF_QUERY_WAN_STATUS, default=current_wan): cv.boolean,
-                vol.Required(
-                    CONF_QUERY_ROUTER_DETAILS, default=current_router
-                ): cv.boolean,
-                vol.Required(
-                    CONF_SESSION_REUSE, default=current_session_reuse
-                ): cv.boolean,
-                vol.Required(
-                    CONF_MESH_TOPOLOGY, default=current_mesh_topology
-                ): cv.boolean,
+                vol.Required("connection"): section(
+                    vol.Schema(
+                        {
+                            vol.Required(CONF_HOST, default=current_host): cv.string,
+                            vol.Required(
+                                CONF_USERNAME, default=current_username
+                            ): cv.string,
+                            vol.Required(
+                                CONF_PASSWORD, default=current_password
+                            ): cv.string,
+                        }
+                    ),
+                    {"collapsed": False},
+                ),
+                vol.Required("data_sources"): section(
+                    vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_QUERY_WAN_STATUS, default=current_wan
+                            ): cv.boolean,
+                            vol.Required(
+                                CONF_QUERY_ROUTER_DETAILS, default=current_router
+                            ): cv.boolean,
+                            vol.Required(
+                                CONF_SESSION_REUSE, default=current_session_reuse
+                            ): cv.boolean,
+                            vol.Required(
+                                CONF_MESH_TOPOLOGY, default=current_mesh_topology
+                            ): cv.boolean,
+                        }
+                    ),
+                    {"collapsed": True},
+                ),
+                vol.Required("refresh"): section(
+                    vol.Schema(
+                        {
+                            vol.Required(
+                                CONF_SCAN_INTERVAL,
+                                default=_scan_interval_key(current_scan_interval),
+                            ): selector.SelectSelector(
+                                selector.SelectSelectorConfig(
+                                    options=_scan_interval_options(
+                                        current_scan_interval
+                                    ),
+                                    translation_key=CONF_SCAN_INTERVAL,
+                                    mode=selector.SelectSelectorMode.DROPDOWN,
+                                )
+                            ),
+                            vol.Required(
+                                CONF_JOIN_REFRESH, default=current_join_refresh
+                            ): cv.boolean,
+                        }
+                    ),
+                    {"collapsed": False},
+                ),
             }
         )
 
         return self.async_show_form(
             step_id="init", data_schema=data_schema, errors=errors
         )
+
+
+# Select keys must be valid translation keys, so the negative presets get names.
+_PRESET_KEYS = {ADAPTIVE_FAST: "fast", 0: "balanced", ADAPTIVE_RELAXED: "relaxed"}
+
+
+def _scan_interval_key(value: int) -> str:
+    """Return the select key for a stored interval."""
+    return _PRESET_KEYS.get(int(value), str(int(value)))
+
+
+def _scan_interval_options(current: int) -> list[str]:
+    """Return the preset select keys, keeping a custom stored interval."""
+    values = list(SCAN_INTERVAL_PRESETS)
+    if int(current) not in values:
+        values.append(int(current))
+    return [_scan_interval_key(v) for v in values]
+
+
+def _parse_scan_interval(value: Any, fallback: int) -> int:
+    """Convert the submitted select key to the stored interval."""
+    for interval, key in _PRESET_KEYS.items():
+        if value == key:
+            return interval
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return int(fallback)
+
+
+_SECTIONS = ("connection", "data_sources", "refresh")
+
+
+def _flatten_sections(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Return the submitted options with the form sections merged away."""
+    flat: dict[str, Any] = {}
+    for key, value in user_input.items():
+        if key in _SECTIONS and isinstance(value, dict):
+            flat.update(value)
+        else:
+            flat[key] = value
+    return flat

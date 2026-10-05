@@ -66,3 +66,20 @@ DEFAULT_SESSION_REUSE = False
 # HTTPS) to the router. Only effective on models with topo_data_tag config.
 CONF_MESH_TOPOLOGY = "mesh_topology"
 DEFAULT_MESH_TOPOLOGY = False
+
+# Poll interval preset. 0 is the adaptive 30/60/120 s behaviour, ADAPTIVE_FAST
+# the adaptive 10/30/60 s one and ADAPTIVE_RELAXED the adaptive 60/120/300 s
+# one. Every poll logs in to the router, which only allows one web session.
+CONF_SCAN_INTERVAL = "scan_interval"
+DEFAULT_SCAN_INTERVAL = 0
+ADAPTIVE_FAST = -1
+ADAPTIVE_RELAXED = -2
+SCAN_INTERVAL_PRESETS = (ADAPTIVE_FAST, 0, ADAPTIVE_RELAXED)
+
+# Opt-in: poll right after a device announces itself with ARP on the LAN instead of
+# waiting for the next interval. Needs raw-socket access on the Home Assistant
+# host, so it is off by default.
+CONF_JOIN_REFRESH = "join_refresh"
+DEFAULT_JOIN_REFRESH = False
+
+# Form-only field of the options flow; only the resulting scan_interval is stored.

@@ -13,12 +13,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    ADAPTIVE_FAST,
+    ADAPTIVE_RELAXED,
     CONF_MESH_TOPOLOGY,
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
     CONF_REGISTER_NEW_DEVICES,
+    CONF_SCAN_INTERVAL,
     CONF_SESSION_REUSE,
     DEFAULT_MESH_TOPOLOGY,
+    DEFAULT_SCAN_INTERVAL,
     DEFAULT_SESSION_REUSE,
     DOMAIN,
 )
@@ -29,6 +33,13 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_UPDATE_INTERVAL = timedelta(seconds=60)
 FAST_UPDATE_INTERVAL = timedelta(seconds=30)
 SLOW_UPDATE_INTERVAL = timedelta(seconds=120)
+ADAPTIVE_TIERS = (FAST_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL, SLOW_UPDATE_INTERVAL)
+FAST_TIERS = (timedelta(seconds=10), timedelta(seconds=30), timedelta(seconds=60))
+RELAXED_TIERS = (
+    timedelta(seconds=60),
+    timedelta(seconds=120),
+    timedelta(seconds=300),
+)
 
 # Force a fresh login if our cached session is older than this. Polling every
 # 30-120s keeps the session active so the router shouldn't naturally idle-time
@@ -90,12 +101,74 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             )
         )
 
+        self._fixed_interval: timedelta | None = None
+        self.set_scan_interval(
+            entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        )
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=DEFAULT_UPDATE_INTERVAL,
+            update_interval=self._fixed_interval or self._tiers[1],
             config_entry=entry,
+        )
+
+    def set_scan_interval(self, seconds: int | None) -> None:
+        """Use a fixed poll interval in seconds.
+
+        0 or None restores the default adaptive tiers; the ADAPTIVE_* presets
+        select the faster or slower ones.
+        """
+        tiers = {ADAPTIVE_FAST: FAST_TIERS, ADAPTIVE_RELAXED: RELAXED_TIERS}.get(
+            seconds, ADAPTIVE_TIERS
+        )
+        fixed = timedelta(seconds=seconds) if seconds and seconds > 0 else None
+        changed = (
+            getattr(self, "_tiers", None) is not tiers
+            or getattr(self, "_fixed_interval", None) != fixed
+        )
+        self._tiers = tiers
+        self._fixed_interval = fixed
+        self._poll_mode = (
+            "fixed"
+            if fixed
+            else {
+                FAST_TIERS: "adaptive_fast",
+                RELAXED_TIERS: "adaptive_relaxed",
+            }.get(tiers, "adaptive_balanced")
+        )
+        # Saving unrelated options must not reset the adaptive progress.
+        if changed and hasattr(self, "update_interval"):
+            self.update_interval = fixed or tiers[1]
+            self._stable_count = 0
+
+    def settings_summary(self) -> dict[str, Any]:
+        """Return the refresh settings in effect, for diagnostics and bundles."""
+        join_refresh = getattr(self, "join_refresh", None)
+        steps = (
+            None
+            if self._fixed_interval
+            else [int(t.total_seconds()) for t in self._tiers]
+        )
+        return {
+            "poll_mode": self._poll_mode,
+            "adaptive_steps_seconds": steps,
+            "poll_interval_seconds": (
+                int(self.update_interval.total_seconds())
+                if self.update_interval
+                else None
+            ),
+            "join_refresh_running": bool(join_refresh and join_refresh.running),
+        }
+
+    def is_device_active(self, mac: str) -> bool:
+        """Return True if the router currently lists this MAC as active."""
+        devices = (self.data or {}).get("devices", {})
+        wanted = mac.lower()
+        return any(
+            key.lower() == wanted and device.get("active")
+            for key, device in devices.items()
         )
 
     @property
@@ -165,19 +238,23 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
     def _adjust_update_interval(self, device_count: int) -> None:
         """Adjust update interval based on device activity."""
+        if self._fixed_interval is not None:
+            return
+
         if device_count == self._last_device_count:
             self._stable_count += 1
         else:
             self._stable_count = 0
             self._last_device_count = device_count
 
+        fast, default, slow = self._tiers
         # If devices are stable for a while, slow down polling
         if self._stable_count > 5:
-            new_interval = SLOW_UPDATE_INTERVAL
+            new_interval = slow
         elif self._stable_count < 2:
-            new_interval = FAST_UPDATE_INTERVAL
+            new_interval = fast
         else:
-            new_interval = DEFAULT_UPDATE_INTERVAL
+            new_interval = default
 
         if self.update_interval != new_interval:
             _LOGGER.debug(
@@ -478,7 +555,9 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             return devices, wanstatus, routerdetails
 
         _fetch_router_data = (
-            _fetch_router_data_reuse if self._reuse_session else _fetch_router_data_legacy
+            _fetch_router_data_reuse
+            if self._reuse_session
+            else _fetch_router_data_legacy
         )
 
         async with self._client_lock:

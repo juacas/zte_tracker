@@ -30,16 +30,50 @@
     "step": {
       "init": {
         "title": "ZTE Router Options",
-        "description": "Update ZTE router configuration",
-        "data": {
-          "host": "Router IP Address",
-          "username": "Username",
-          "password": "Password",
-          "model": "Router Model",
-          "query_wan_status": "Query WAN status",
-          "query_router_details": "Query router details",
-          "session_reuse": "Persistent session (reduces auth log noise)",
-          "mesh_topology": "Mesh topology (see all mesh node devices)"
+        "description": "Connection, data sources and how quickly device changes are picked up.",
+        "sections": {
+          "connection": {
+            "name": "Router connection",
+            "description": "Where and how Home Assistant logs in to the router web UI.",
+            "data": {
+              "host": "Router IP Address",
+              "username": "Username",
+              "password": "Password"
+            },
+            "data_description": {
+              "host": "IP address or hostname of the router.",
+              "username": "Router web UI user name.",
+              "password": "Router web UI password."
+            }
+          },
+          "data_sources": {
+            "name": "Data to collect",
+            "description": "Extra router queries. Each one is an additional request on every poll.",
+            "data": {
+              "query_wan_status": "Query WAN status",
+              "query_router_details": "Query router details",
+              "session_reuse": "Persistent session (reduces auth log noise)",
+              "mesh_topology": "Mesh topology (see all mesh node devices)"
+            },
+            "data_description": {
+              "query_wan_status": "Adds WAN details (IP, link state, uptime, optical levels on supported models) to the router status sensor.",
+              "query_router_details": "Adds router model, firmware, uptime, CPU and memory usage to the router status sensor.",
+              "session_reuse": "Keep one router login between polls instead of logging in and out every time. Fewer router log entries; a stale session is re-created automatically.",
+              "mesh_topology": "Also list devices connected to mesh agent nodes, not only the controller."
+            }
+          },
+          "refresh": {
+            "name": "Refresh speed",
+            "description": "How fast new devices show up.",
+            "data": {
+              "scan_interval": "Poll interval",
+              "join_refresh": "Refresh when a device joins the network"
+            },
+            "data_description": {
+              "scan_interval": "How often Home Assistant asks the router for devices. Every preset speeds up when devices change. Each poll logs in to the router, so very short intervals can log you out of its web UI.",
+              "join_refresh": "Poll the router right after an unknown or disconnected device announces itself on the LAN (heard through ARP, so static IPs work too). Needs Home Assistant on the same network. Off by default."
+            }
+          }
         }
       }
     },
@@ -70,6 +104,10 @@
       "name": "Reboot router",
       "description": "Reboot the ZTE router. Optionally specify a hostname to reboot only that router."
     },
+    "refresh": {
+      "name": "Refresh router",
+      "description": "Poll the ZTE router now instead of waiting for the next interval. Optionally specify a host to refresh only that router."
+    },
     "remove_tracked_entity": {
       "name": "Remove tracked device",
       "description": "Remove a tracked device entity by MAC address.",
@@ -83,6 +121,15 @@
     "remove_unidentified_entities": {
       "name": "Remove unidentified device_tracker entities",
       "description": "Remove all device_tracker entities that have no unique_id."
+    }
+  },
+  "selector": {
+    "scan_interval": {
+      "options": {
+        "fast": "Adaptive fast (10 to 60 s)",
+        "balanced": "Adaptive balanced (30 to 120 s, recommended)",
+        "relaxed": "Adaptive relaxed (60 to 300 s)"
+      }
     }
   }
 }

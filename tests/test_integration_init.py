@@ -77,6 +77,7 @@ def _coordinator():
         logout=Mock(),
     )
     coordinator.async_reboot_router = AsyncMock(return_value=True)
+    coordinator.set_scan_interval = Mock()
     return coordinator
 
 
@@ -154,7 +155,9 @@ async def test_async_setup_entry_migrates_legacy_flags_and_registers_services(
     )
     setup_services.assert_called_once_with(hass)
     entry.add_update_listener.assert_called_once()
-    entry.async_on_unload.assert_called_once()
+    # join refresh shutdown plus the options listener
+    assert entry.async_on_unload.call_count == 2
+    assert coordinator.join_refresh.running is False
 
 
 @pytest.mark.asyncio
@@ -269,6 +272,19 @@ async def test_async_unload_entry_closes_client_session(mock_hass) -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_unload_entry_stops_join_refresh_first(mock_hass) -> None:
+    """The join listener is stopped as soon as the platforms are unloaded."""
+    hass = _hass(mock_hass)
+    entry = _entry()
+    coordinator = _coordinator()
+    coordinator.join_refresh = Mock()
+    hass.data[DOMAIN] = {entry.entry_id: coordinator}
+
+    assert await zte_init.async_unload_entry(hass, entry) is True
+    coordinator.join_refresh.async_shutdown.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_async_unload_entry_ignores_logout_errors(mock_hass) -> None:
     """Logout failures should not make unload fail."""
     hass = _hass(mock_hass)
@@ -298,6 +314,24 @@ async def test_async_reboot_service_filters_by_host_and_raises_when_nothing_rebo
 
     with pytest.raises(HomeAssistantError, match="No routers rebooted"):
         await zte_init.async_reboot_service(_call(hass, {"host": "10.0.0.2"}))
+
+
+@pytest.mark.asyncio
+async def test_async_refresh_service_filters_by_host_and_raises_when_none(
+    mock_hass,
+) -> None:
+    """The refresh service polls matching routers only."""
+    hass = _hass(mock_hass)
+    coordinator = _coordinator()
+    hass.data[DOMAIN] = {"entry-1": coordinator, "yaml_config": {}}
+
+    await zte_init.async_refresh_service(_call(hass))
+    await zte_init.async_refresh_service(_call(hass, {"host": "192.168.1.1"}))
+    assert coordinator.async_request_refresh.await_count == 2
+
+    with pytest.raises(HomeAssistantError, match="No ZTE router found"):
+        await zte_init.async_refresh_service(_call(hass, {"host": "10.0.0.2"}))
+    assert coordinator.async_request_refresh.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -454,6 +488,6 @@ def test_setup_services_registers_all_service_handlers(mock_hass) -> None:
 
     zte_init.setup_services(hass)
 
-    assert hass.services.async_register.call_count == 4
+    assert hass.services.async_register.call_count == 5
     register_calls = hass.services.async_register.call_args_list
     assert register_calls[-1].kwargs["supports_response"] is SupportsResponse.OPTIONAL
