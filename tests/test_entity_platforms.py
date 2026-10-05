@@ -29,13 +29,18 @@ def _entry() -> MockConfigEntry:
     )
 
 
-def _coordinator(devices: dict | None = None, router_info: dict | None = None):
+def _coordinator(
+    devices: dict | None = None,
+    router_info: dict | None = None,
+    parental_controls: list[dict] | None = None,
+):
     coordinator = SimpleNamespace()
     coordinator.client = SimpleNamespace(
         host="192.168.1.1",
         model="F6640",
         base_url="https://192.168.1.1",
         mesh_topology=False,
+        paths={},
     )
     coordinator.data = {
         "devices": devices or {},
@@ -47,6 +52,7 @@ def _coordinator(devices: dict | None = None, router_info: dict | None = None):
             "HardwareVer": "V2.0.0",
             **(router_info or {}),
         },
+        "parental_controls": [dict(rule) for rule in (parental_controls or [])],
     }
     coordinator.last_update_success = True
     coordinator.update_interval = timedelta(seconds=60)
@@ -61,6 +67,16 @@ def _coordinator(devices: dict | None = None, router_info: dict | None = None):
     )
     coordinator.disable_register_new_devices = Mock(
         side_effect=lambda: setattr(coordinator, "register_new_devices", False)
+    )
+    async def _async_set_parental_control(inst_id: str, enabled: bool) -> bool:
+        for rule in coordinator.data["parental_controls"]:
+            if rule["id"] == inst_id:
+                rule["enabled"] = enabled
+                return True
+        return False
+
+    coordinator.async_set_parental_control_enabled = AsyncMock(
+        side_effect=_async_set_parental_control
     )
     coordinator.paused = False
     return coordinator
@@ -215,6 +231,73 @@ async def test_switches_setup_and_toggle_behaviors(mock_hass) -> None:
     await register_switch.async_turn_on()
     assert coordinator.enable_register_new_devices.called
     assert register_switch.async_write_ha_state.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_parental_control_switches_setup_and_toggle_behaviors(
+    mock_hass,
+) -> None:
+    """Router parental-control rules should be exposed as switches."""
+    entry = _entry()
+    coordinator = _coordinator(
+        parental_controls=[
+            {"id": "DEV.PCUser1", "name": "Tv zal", "enabled": False},
+            {"id": "DEV.PCUser2", "name": "Tv kitchen", "enabled": True},
+        ]
+    )
+    coordinator.client.model = "F680"
+    coordinator.client.paths = {"tag_parentctrl_data": "firewall_parentctrl_lua.lua"}
+    coordinator.data["router_info"]["ModelName"] = "F680"
+    mock_hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+    added: list = []
+
+    await switch.async_setup_entry(mock_hass, entry, added.extend)
+
+    parental_switch = next(
+        entity
+        for entity in added
+        if isinstance(entity, switch.ZteParentalControlSwitch)
+        and entity.unique_id == "entry-1_DEV.PCUser1"
+    )
+
+    assert parental_switch.name == "Tv zal Parental Control"
+    assert parental_switch.extra_state_attributes == {
+        "router_rule_id": "DEV.PCUser1"
+    }
+    assert parental_switch.is_on is False
+
+    await parental_switch.async_turn_on()
+    coordinator.async_set_parental_control_enabled.assert_awaited_with(
+        "DEV.PCUser1", True
+    )
+    assert parental_switch.is_on is True
+
+    await parental_switch.async_turn_off()
+    coordinator.async_set_parental_control_enabled.assert_awaited_with(
+        "DEV.PCUser1", False
+    )
+    assert parental_switch.is_on is False
+
+
+@pytest.mark.asyncio
+async def test_non_f680_models_do_not_create_parental_control_switches(
+    mock_hass,
+) -> None:
+    """Rules must stay hidden on models that do not advertise the endpoint."""
+    entry = _entry()
+    coordinator = _coordinator(
+        parental_controls=[
+            {"id": "DEV.PCUser1", "name": "Tv zal", "enabled": False},
+        ]
+    )
+    mock_hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+    added: list = []
+
+    await switch.async_setup_entry(mock_hass, entry, added.extend)
+
+    assert not any(
+        isinstance(entity, switch.ZteParentalControlSwitch) for entity in added
+    )
 
 
 @pytest.mark.asyncio
