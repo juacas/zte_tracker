@@ -42,6 +42,14 @@ class _FakeCoordinator:
     _device_cache = {"aa:bb:cc:dd:ee:ff": {}}
     _topo_failures = 0
 
+    def settings_summary(self):
+        return {
+            "poll_mode": "adaptive_fast",
+            "adaptive_steps_seconds": [10, 30, 60],
+            "poll_interval_seconds": 30,
+            "join_refresh_running": True,
+        }
+
     def __init__(self):
         self.client = _FakeClient()
         self.data = {
@@ -136,6 +144,11 @@ class TestDiagnostics(TestCase):
         self.assertEqual(router["model_reported"], "F6640")
         self.assertEqual(router["hardware_version"], "V10.0.04")
         self.assertEqual(router["firmware_version"], "ZTEGF6640P2N10D_V")
+
+    def test_reports_the_refresh_settings_in_effect(self):
+        settings = self.result["coordinator"]["refresh_settings"]
+        self.assertEqual(settings["poll_mode"], "adaptive_fast")
+        self.assertTrue(settings["join_refresh_running"])
 
     def test_reports_the_endpoint_profile(self):
         """The profile is the field that makes an unknown-model report usable."""

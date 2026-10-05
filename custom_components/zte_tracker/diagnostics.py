@@ -129,6 +129,12 @@ def _support_bundle_hint(hass: HomeAssistant) -> dict[str, Any]:
     }
 
 
+def _refresh_settings(coordinator: Any) -> dict[str, Any] | None:
+    """Return the refresh settings in effect, or None on an older coordinator."""
+    summary = getattr(coordinator, "settings_summary", None)
+    return summary() if callable(summary) else None
+
+
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
@@ -176,6 +182,7 @@ async def async_get_config_entry_diagnostics(
             if coordinator.update_interval
             else None
         ),
+        "refresh_settings": _refresh_settings(coordinator),
         "last_update_success": coordinator.last_update_success,
         "cached_devices": len(getattr(coordinator, "_device_cache", {}) or {}),
         "topology_failures": getattr(client, "_topo_failures", 0),

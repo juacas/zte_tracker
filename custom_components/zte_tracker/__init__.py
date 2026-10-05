@@ -26,18 +26,23 @@ from homeassistant.helpers.typing import ConfigType
 import voluptuous as vol
 
 from .const import (
+    CONF_JOIN_REFRESH,
     CONF_MESH_TOPOLOGY,
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
+    CONF_SCAN_INTERVAL,
     CONF_SESSION_REUSE,
+    DEFAULT_JOIN_REFRESH,
     DEFAULT_MESH_TOPOLOGY,
     DEFAULT_QUERY_ROUTER_DETAILS,
     DEFAULT_QUERY_WAN_STATUS,
+    DEFAULT_SCAN_INTERVAL,
     DEFAULT_SESSION_REUSE,
     DOMAIN,
     PLATFORMS,
 )
 from .coordinator import ZteDataCoordinator
+from .live_refresh import JoinRefresh
 from .support_bundle import BUNDLE_DIRNAME, build_bundle
 from .zteclient.zte_client import zteClient
 
@@ -109,6 +114,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    coordinator.join_refresh = JoinRefresh(hass, coordinator)
+    entry.async_on_unload(coordinator.join_refresh.async_shutdown)
+    coordinator.join_refresh.async_set_enabled(
+        bool(entry.options.get(CONF_JOIN_REFRESH, DEFAULT_JOIN_REFRESH))
+    )
+
     # Set up all platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -168,6 +179,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         coordinator._mesh_topology = new_mesh_topology
 
+        coordinator.set_scan_interval(
+            updated_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        )
+        join_refresh = getattr(coordinator, "join_refresh", None)
+        if join_refresh is not None:
+            join_refresh.async_set_enabled(
+                bool(updated_entry.options.get(CONF_JOIN_REFRESH, DEFAULT_JOIN_REFRESH))
+            )
+
         # Apply to existing client
         client = getattr(coordinator, "client", None)
         if client:
@@ -206,6 +226,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        # Stop listening before the logout so no join poll runs after it.
+        if join_refresh := getattr(coordinator, "join_refresh", None):
+            join_refresh.async_shutdown()
         # Best-effort: cleanly close the persistent router session so we don't
         # leave a stale logged-in session on the device. Wrapped in timeout
         # and broad exception catch so a hung/dead router can never block or
@@ -231,6 +254,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 REBOOT_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional("host"): vol.Coerce(str),
+    }
+)
+
+REFRESH_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("host"): cv.string,
     }
 )
 
@@ -281,6 +310,26 @@ async def async_reboot_service(call: ServiceCall):
     else:
         _LOGGER.warning("No routers rebooted. Host: %s", host)
         raise HomeAssistantError(f"No routers rebooted for host: {host}")
+
+
+async def async_refresh_service(call: ServiceCall):
+    """Poll router(s) now, for the specified host or all if not specified."""
+    host = call.data.get("host")
+    refreshed = 0
+
+    for entry_id, coordinator in list(call.hass.data[DOMAIN].items()):
+        if entry_id == "yaml_config":
+            continue
+        client = getattr(coordinator, "client", None)
+        if not client or (host and getattr(client, "host", None) != host):
+            continue
+        await coordinator.async_request_refresh()
+        refreshed += 1
+
+    if not refreshed:
+        raise HomeAssistantError(
+            "No ZTE router found to refresh" + (f" (host={host})" if host else "")
+        )
 
 
 async def async_remove_tracked_entity(call: ServiceCall):
@@ -476,6 +525,10 @@ async def async_export_support_bundle_service(call: ServiceCall) -> ServiceRespo
         else:
             bundle = await hass.async_add_executor_job(build_bundle, client)
 
+        settings = getattr(coordinator, "settings_summary", None)
+        if callable(settings):
+            bundle["integration_settings"] = settings()
+
         if bundle.get("error") and not bundle.get("preauth"):
             # A failed login is the one case the pre-auth probes exist for, so
             # the file is written whenever they captured anything: it is the
@@ -535,6 +588,12 @@ def setup_services(hass):
         "reboot",
         async_reboot_service,
         schema=REBOOT_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "refresh",
+        async_refresh_service,
+        schema=REFRESH_SERVICE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

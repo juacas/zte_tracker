@@ -12,13 +12,17 @@ from homeassistant.const import CONF_HOST, CONF_MODEL, CONF_PASSWORD, CONF_USERN
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.zte_tracker.const import (
+    ADAPTIVE_FAST,
+    ADAPTIVE_RELAXED,
     CONF_MESH_TOPOLOGY,
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
+    CONF_SCAN_INTERVAL,
     CONF_SESSION_REUSE,
     DOMAIN,
 )
 from custom_components.zte_tracker.coordinator import (
+    FAST_UPDATE_INTERVAL,
     SESSION_MAX_AGE,
     ZteDataCoordinator,
 )
@@ -398,3 +402,124 @@ def test_legacy_scanner_handles_success_and_failures(mock_hass) -> None:
     client.login.side_effect = RuntimeError("boom")
     assert scanner._get_data() == []
     assert client.logout.called
+
+
+def test_scan_interval_defaults_to_adaptive_polling(mock_hass) -> None:
+    """Without the option the coordinator keeps adapting its interval."""
+    coordinator = ZteDataCoordinator(_hass(mock_hass), _entry())
+
+    coordinator._adjust_update_interval(3)
+
+    assert coordinator.update_interval == FAST_UPDATE_INTERVAL
+
+
+def test_fixed_scan_interval_is_never_adapted(mock_hass) -> None:
+    """A configured interval wins over the 30/60/120 s adaptive logic."""
+    coordinator = ZteDataCoordinator(
+        _hass(mock_hass), _entry(options={CONF_SCAN_INTERVAL: 15})
+    )
+    assert coordinator.update_interval == timedelta(seconds=15)
+
+    for count in (1, 1, 1, 1, 1, 1, 1, 5):
+        coordinator._adjust_update_interval(count)
+
+    assert coordinator.update_interval == timedelta(seconds=15)
+
+
+def test_set_scan_interval_switches_at_runtime(mock_hass) -> None:
+    """The options listener can change the interval without a reload."""
+    coordinator = ZteDataCoordinator(_hass(mock_hass), _entry())
+
+    coordinator.set_scan_interval(20)
+    assert coordinator.update_interval == timedelta(seconds=20)
+
+    coordinator.set_scan_interval(0)
+    coordinator._adjust_update_interval(3)
+    assert coordinator.update_interval == FAST_UPDATE_INTERVAL
+
+
+def test_adaptive_fast_uses_shorter_steps(mock_hass) -> None:
+    """The fast preset adapts between 10, 30 and 60 seconds."""
+    coordinator = ZteDataCoordinator(
+        _hass(mock_hass), _entry(options={CONF_SCAN_INTERVAL: ADAPTIVE_FAST})
+    )
+    assert coordinator.update_interval == timedelta(seconds=30)
+
+    coordinator._adjust_update_interval(3)
+    assert coordinator.update_interval == timedelta(seconds=10)
+
+    for _ in range(7):
+        coordinator._adjust_update_interval(3)
+    assert coordinator.update_interval == timedelta(seconds=60)
+
+    coordinator.set_scan_interval(0)
+    coordinator._adjust_update_interval(5)
+    assert coordinator.update_interval == FAST_UPDATE_INTERVAL
+
+
+def test_settings_summary_reports_mode_and_interval(mock_hass) -> None:
+    """Diagnostics and bundles read the effective refresh settings."""
+    coordinator = ZteDataCoordinator(_hass(mock_hass), _entry(options={}))
+    summary = coordinator.settings_summary()
+    assert summary["poll_mode"] == "adaptive_balanced"
+    assert summary["adaptive_steps_seconds"] == [30, 60, 120]
+    assert summary["poll_interval_seconds"] == 60
+    assert summary["join_refresh_running"] is False
+
+    coordinator.set_scan_interval(ADAPTIVE_FAST)
+    assert coordinator.settings_summary()["poll_mode"] == "adaptive_fast"
+    coordinator.set_scan_interval(ADAPTIVE_RELAXED)
+    assert coordinator.settings_summary()["poll_mode"] == "adaptive_relaxed"
+
+    coordinator.set_scan_interval(45)
+    summary = coordinator.settings_summary()
+    assert summary["poll_mode"] == "fixed"
+    assert summary["adaptive_steps_seconds"] is None
+    assert summary["poll_interval_seconds"] == 45
+
+
+def test_adaptive_relaxed_uses_longer_steps(mock_hass) -> None:
+    """The relaxed preset adapts between 60, 120 and 300 seconds."""
+    coordinator = ZteDataCoordinator(
+        _hass(mock_hass), _entry(options={CONF_SCAN_INTERVAL: ADAPTIVE_RELAXED})
+    )
+    assert coordinator.update_interval == timedelta(seconds=120)
+
+    coordinator._adjust_update_interval(3)
+    assert coordinator.update_interval == timedelta(seconds=60)
+
+    for _ in range(7):
+        coordinator._adjust_update_interval(3)
+    assert coordinator.update_interval == timedelta(seconds=300)
+
+
+def test_is_device_active_matches_mac_case_insensitively(mock_hass) -> None:
+    """Only a device the router lists as active counts as connected."""
+    coordinator = ZteDataCoordinator(_hass(mock_hass), _entry())
+    coordinator.data = {
+        "devices": {
+            "AA:BB:CC:DD:EE:01": {"active": True},
+            "AA:BB:CC:DD:EE:02": {"active": False},
+        }
+    }
+
+    assert coordinator.is_device_active("aa:bb:cc:dd:ee:01")
+    assert not coordinator.is_device_active("aa:bb:cc:dd:ee:02")
+    assert not coordinator.is_device_active("aa:bb:cc:dd:ee:03")
+    coordinator.data = None
+    assert not coordinator.is_device_active("aa:bb:cc:dd:ee:01")
+
+
+def test_unchanged_scan_interval_keeps_adaptive_progress(mock_hass) -> None:
+    """Saving unrelated options must not drop a settled install to a faster tier."""
+    coordinator = ZteDataCoordinator(_hass(mock_hass), _entry())
+    for _ in range(7):
+        coordinator._adjust_update_interval(3)
+    settled = coordinator.update_interval
+
+    coordinator.set_scan_interval(0)
+    assert coordinator.update_interval == settled
+    assert coordinator._stable_count > 5
+
+    coordinator.set_scan_interval(ADAPTIVE_FAST)
+    assert coordinator._stable_count == 0

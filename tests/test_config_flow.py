@@ -20,9 +20,11 @@ from custom_components.zte_tracker.config_flow import (
     validate_username,
 )
 from custom_components.zte_tracker.const import (
+    CONF_JOIN_REFRESH,
     CONF_MESH_TOPOLOGY,
     CONF_QUERY_ROUTER_DETAILS,
     CONF_QUERY_WAN_STATUS,
+    CONF_SCAN_INTERVAL,
     CONF_SESSION_REUSE,
     DEFAULT_QUERY_ROUTER_DETAILS,
     DEFAULT_QUERY_WAN_STATUS,
@@ -347,6 +349,64 @@ async def test_options_flow_updates_booleans_without_revalidating(mock_hass) -> 
 
 
 @pytest.mark.asyncio
+async def test_options_flow_saves_preset_interval_and_join_refresh(mock_hass) -> None:
+    """The interval preset and join refresh are stored without any extra step."""
+    handler = OptionsFlowHandler(_options_entry())
+    handler.hass = mock_hass
+
+    result = await handler.async_step_init(
+        {
+            "connection": {
+                CONF_HOST: "192.168.1.1",
+                CONF_USERNAME: "admin",
+                CONF_PASSWORD: "secret",
+            },
+            "refresh": {CONF_SCAN_INTERVAL: "fast", CONF_JOIN_REFRESH: True},
+        }
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_SCAN_INTERVAL] == -1
+    assert result["data"][CONF_JOIN_REFRESH] is True
+
+
+@pytest.mark.asyncio
+async def test_options_flow_adaptive_omits_live_refresh_keys(mock_hass) -> None:
+    """Adaptive and off are the defaults, so nothing new is stored for them."""
+    entry = _options_entry(options={CONF_SCAN_INTERVAL: 30})
+    handler = OptionsFlowHandler(entry)
+    handler.hass = mock_hass
+
+    result = await handler.async_step_init(
+        {
+            CONF_HOST: "192.168.1.1",
+            CONF_USERNAME: "admin",
+            CONF_PASSWORD: "secret",
+            CONF_SCAN_INTERVAL: "balanced",
+        }
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_SCAN_INTERVAL not in result["data"]
+    assert CONF_JOIN_REFRESH not in result["data"]
+
+
+@pytest.mark.asyncio
+async def test_options_form_offers_presets_and_keeps_a_custom_value(mock_hass) -> None:
+    """A previously stored custom interval stays selectable."""
+    handler = OptionsFlowHandler(_options_entry(options={CONF_SCAN_INTERVAL: 45}))
+    handler.hass = mock_hass
+
+    result = await handler.async_step_init()
+    refresh = result["data_schema"].schema["refresh"].schema.schema
+    key = next(k for k in refresh if str(k) == CONF_SCAN_INTERVAL)
+
+    assert key.default() == "45"
+    assert "45" in refresh[key].config["options"]
+    assert refresh[key].config["options"][:3] == ["fast", "balanced", "relaxed"]
+
+
+@pytest.mark.asyncio
 async def test_options_flow_updates_credentials_and_schedules_reload(
     mock_hass,
 ) -> None:
@@ -457,3 +517,22 @@ async def test_options_flow_keeps_submitted_values_on_validation_error(
         CONF_USERNAME: "invalid_username",
         CONF_PASSWORD: "invalid_password",
     }
+
+
+@pytest.mark.asyncio
+async def test_options_form_is_grouped_in_sections(mock_hass) -> None:
+    """The form groups fields, and a submitted form validates against it."""
+    handler = OptionsFlowHandler(_options_entry())
+    handler.hass = mock_hass
+
+    result = await handler.async_step_init()
+    schema = result["data_schema"]
+
+    assert [str(key) for key in schema.schema] == [
+        "connection",
+        "data_sources",
+        "refresh",
+    ]
+    validated = schema({"connection": {}, "data_sources": {}, "refresh": {}})
+    assert validated["refresh"][CONF_SCAN_INTERVAL] == "balanced"
+    assert validated["refresh"][CONF_JOIN_REFRESH] is False

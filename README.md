@@ -96,6 +96,14 @@ Remotely reboots the router (supported by most router models).
 service: zte_tracker.reboot
 ```
 
+### `zte_tracker.refresh`
+
+Polls the router now instead of waiting for the next interval. Optional `host` limits it to one router. Calls are rate limited to one poll every 10 seconds. Handy in an automation, for example when the Companion app reports a phone joined the Wi-Fi.
+
+```yaml
+service: zte_tracker.refresh
+```
+
 ### `zte_tracker.remove_tracked_entity`
 
 Removes a tracked device entity by MAC address.
@@ -299,6 +307,20 @@ The integration automatically adjusts polling intervals based on network activit
 - **Fast polling** (30s): When device states are changing frequently
 - **Normal polling** (60s): Default interval for stable networks
 - **Slow polling** (120s): When the network has been stable for extended periods
+
+### Poll Interval
+
+In the integration options, **Refresh speed → Poll interval** is *Adaptive balanced* by default (behaviour above). *Adaptive fast* uses the same logic with 10/30/60 s steps, so changes are noticed sooner but the router is polled more often. *Adaptive relaxed* uses 60/120/300 s steps to put less load on the router.
+
+### Refresh When a Device Joins (off by default)
+
+Enable **Refresh when a device joins the network** to poll right after a device that the router does not list as active announces itself on the LAN. This shortens the time to see a device arrive from up to a minute to a few seconds.
+
+- Joins are heard as ARP frames through a Linux packet socket, so devices with a static IP are caught too.
+- Home Assistant must be on the same network as the devices (not across VLANs, and not with Wi-Fi client isolation) and have raw-socket access (default on Home Assistant OS; a container needs host networking and `NET_RAW`). If the listener cannot start, a warning is logged and polling continues unchanged.
+- Traffic from devices that are already active never triggers a poll. A MAC the router still does not list after two checks is ignored for an hour.
+- Alternative that works anywhere: call the `zte_tracker.refresh` service from an automation.
+- A device leaving is still found by polling.
 
 ### Device Persistence
 
