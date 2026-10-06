@@ -277,7 +277,11 @@ jobs:
     name: Validate the release tree
     runs-on: ubuntu-latest
     needs: resolve
-    if: needs.resolve.outputs.should_publish == 'true' || needs.resolve.outputs.dry_run == 'true'
+    # always(): prepare is skipped for rc and target_sha runs, and a skipped ancestor would skip every job below.
+    if: >-
+      always() &&
+      needs.resolve.result == 'success' &&
+      (needs.resolve.outputs.should_publish == 'true' || needs.resolve.outputs.dry_run == 'true')
     permissions:
       contents: read
     steps:
@@ -322,7 +326,11 @@ jobs:
     needs:
       - resolve
       - validate
-    if: needs.resolve.outputs.should_publish == 'true' || needs.resolve.outputs.dry_run == 'true'
+    if: >-
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.validate.result == 'success' &&
+      (needs.resolve.outputs.should_publish == 'true' || needs.resolve.outputs.dry_run == 'true')
     permissions:
       contents: read
       pull-requests: read
@@ -389,7 +397,12 @@ jobs:
     needs:
       - resolve
       - changelog
-    if: needs.resolve.outputs.should_tag == 'true' && needs.resolve.outputs.dry_run != 'true'
+    if: >-
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.changelog.result == 'success' &&
+      needs.resolve.outputs.should_tag == 'true' &&
+      needs.resolve.outputs.dry_run != 'true'
     permissions:
       contents: write
     steps:
