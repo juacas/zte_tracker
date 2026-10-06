@@ -55,9 +55,13 @@ def test_init_resolves_scheme_models_and_profiles() -> None:
     http_client = _make_client("F6640", scheme="http", verify_ssl=True)
 
     assert "F6640" in zteClient.get_models()
+    assert "F6601P" in zteClient.get_models()
     assert https_client.base_url == "https://192.168.1.1"
     assert http_client.base_url == "http://192.168.1.1"
     assert http_client.verify_ssl is False
+    f6601p = _make_client("F6601P")
+    assert f6601p.paths["wlan_script"] == "wlan_client_stat_lua.lua"
+    assert "tag_pon_optical_data" not in f6601p.paths
     profiles = zteClient.get_profiles()
     assert "F6640" in profiles
     assert "F8748" in profiles
@@ -277,6 +281,39 @@ def test_get_wifi_devices_tries_direct_then_falls_back() -> None:
     client.session = None
     assert client.get_wifi_devices() is None
     assert "Failed to get WiFi devices" in client.statusmsg
+
+
+def test_device_request_relogs_in_after_router_session_timeout() -> None:
+    """HTTP 200 SessionTimeout responses should refresh auth and retry once."""
+    client = _make_client()
+    old_session = MagicMock()
+    new_session = MagicMock()
+    client.session = old_session
+    client.login_data = {"login_need_refresh": 0}
+    client.login = Mock(side_effect=lambda: _replace_session(client, new_session))
+
+    timeout = _response(
+        text=(
+            "<ajax_response_xml_root><IF_ERRORSTR>SessionTimeout</IF_ERRORSTR>"
+            "</ajax_response_xml_root>"
+        )
+    )
+    success = _response(text="<ajax_response_xml_root/>")
+    old_session.get.return_value = timeout
+    new_session.get.return_value = success
+
+    response = client._request_with_session_retry("GET", "http://router/data")
+
+    assert response is success
+    old_session.close.assert_called_once()
+    assert client.session is new_session
+    new_session.get.assert_called_once_with("http://router/data")
+
+
+def _replace_session(client: zteClient, session: MagicMock) -> bool:
+    client.session = session
+    client.login_data = {"login_need_refresh": 0}
+    return True
 
 
 def test_fetch_topology_inline_tracks_failures_and_success() -> None:
