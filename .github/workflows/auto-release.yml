@@ -28,8 +28,7 @@ on:
         type: choice
         options:
           - stable
-          # rc is disabled: it tags the tree as it is, so manifest.json would still name the previous version.
-          # - rc
+          - rc
       dry_run:
         description: "Dry run: print the plan and change nothing."
         required: false
@@ -240,10 +239,11 @@ jobs:
       (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       tag_name: ${{ steps.resolve.outputs.tag_name }}
-      # A dry run never merges, so the tag name is still the old version: this is the one the run is really about.
-      planned_version: ${{ needs.prepare.outputs.next_version }}
+      # A dry run never merges, so stable runs need prepare's plan while rc runs already know the prerelease tag.
+      planned_version: ${{ needs.prepare.outputs.next_version || steps.resolve.outputs.tag_name }}
       changelog_version: ${{ steps.resolve.outputs.changelog_version }}
       manifest_version: ${{ steps.resolve.outputs.manifest_version }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
@@ -263,6 +263,7 @@ jobs:
       - name: Choose the release target
         id: resolve
         env:
+          BUMP_INPUT: ${{ inputs.bump }}
           GH_TOKEN: ${{ github.token }}
           DRY_RUN: ${{ inputs.dry_run || false }}
           MODE: ${{ inputs.mode || 'stable' }}
@@ -285,6 +286,13 @@ jobs:
         uses: actions/checkout@v5
         with:
           ref: ${{ needs.resolve.outputs.target_sha }}
+
+      - name: Prepare the prerelease tree
+        if: needs.resolve.outputs.prerelease == 'true' && needs.resolve.outputs.tag_state == 'missing'
+        env:
+          NEXT_VERSION: ${{ needs.resolve.outputs.manifest_version }}
+          WRITE_CHANGELOG: "false"
+        run: .github/scripts/write_manifest_and_changelog.sh
 
       - name: Check the changelog
         if: needs.resolve.outputs.prerelease != 'true'
@@ -364,7 +372,7 @@ jobs:
         env:
           CHANGELOG_VERSION: ${{ needs.resolve.outputs.changelog_version }}
           MANIFEST_VERSION: ${{ needs.resolve.outputs.manifest_version }}
-          PLANNED_VERSION: ${{ needs.prepare.outputs.next_version }}
+          PLANNED_VERSION: ${{ needs.resolve.outputs.planned_version }}
           PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
           SHOULD_PUBLISH: ${{ needs.resolve.outputs.should_publish }}
           SHOULD_TAG: ${{ needs.resolve.outputs.should_tag }}
@@ -391,9 +399,17 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.target_sha }}
 
+      - name: Prepare the prerelease tree
+        if: needs.resolve.outputs.prerelease == 'true' && needs.resolve.outputs.tag_state == 'missing'
+        env:
+          NEXT_VERSION: ${{ needs.resolve.outputs.manifest_version }}
+          WRITE_CHANGELOG: "false"
+        run: .github/scripts/write_manifest_and_changelog.sh
+
       - name: Create the release tag
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
           TAG_NAME: ${{ needs.resolve.outputs.tag_name }}
           TAG_MESSAGE: ${{ needs.changelog.outputs.tag_message }}
           TARGET_SHA: ${{ needs.resolve.outputs.target_sha }}
@@ -448,7 +464,7 @@ jobs:
           INPUT_RELEASE_NOTES: ${{ inputs.release_notes }}
           INPUT_TARGET_SHA: ${{ inputs.target_sha }}
           MANIFEST_VERSION: ${{ needs.resolve.outputs.manifest_version }}
-          PLANNED_VERSION: ${{ needs.prepare.outputs.next_version }}
+          PLANNED_VERSION: ${{ needs.resolve.outputs.planned_version }}
           PR_URL: ${{ needs.prepare.outputs.pr_url }}
           PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
