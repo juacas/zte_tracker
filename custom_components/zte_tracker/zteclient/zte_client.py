@@ -858,6 +858,14 @@ class zteClient:
                     }
                 )
 
+            # Names and counts only: rule names and MACs stay out of the log.
+            _LOGGER.debug(
+                "Parental controls: %d rule(s) parsed from %d instance(s), "
+                "top-level nodes %s",
+                len(rules),
+                len(xml.findall(".//Instance")),
+                [child.tag for child in xml][:10],
+            )
             return sorted(rules, key=lambda rule: str(rule["id"]))
         except Exception as ex:
             _LOGGER.warning("Failed to fetch parental controls: %s", ex)
