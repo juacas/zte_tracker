@@ -92,3 +92,32 @@ class TestParentalControl(TestCase):
         request_url = client.session.post.call_args.args[0]
         self.assertIn("?_type=menuData", request_url)
         self.assertIn("_tag=firewall_parentctrl_lua.lua", request_url)
+
+    def test_get_parental_controls_logs_counts_without_rule_names(self):
+        client = _make_client()
+        response = MagicMock(text=SAMPLE, request=None)
+        response.raise_for_status = Mock()
+        client.session.get.return_value = response
+
+        with self.assertLogs(level="DEBUG") as logs:
+            client.get_parental_controls()
+
+        output = "\n".join(logs.output)
+        self.assertIn("2 rule(s) parsed from 2 instance(s)", output)
+        self.assertNotIn("Tv zal", output)
+        self.assertNotIn("AA:BB:CC:DD:EE:FF", output)
+
+    def test_get_parental_controls_logs_empty_response(self):
+        client = _make_client()
+        response = MagicMock(
+            text="<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR>"
+            "</ajax_response_xml_root>",
+            request=None,
+        )
+        response.raise_for_status = Mock()
+        client.session.get.return_value = response
+
+        with self.assertLogs(level="DEBUG") as logs:
+            self.assertEqual(client.get_parental_controls(), [])
+
+        self.assertIn("0 rule(s) parsed from 0 instance(s)", "\n".join(logs.output))
