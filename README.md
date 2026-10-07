@@ -36,6 +36,7 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
 - **Router status monitoring** with connection health indicators: WAN uptime, WAN_remain_leasetime, WAN_error_message, WAN_connected (kindly requested by @cagnulein)
 - **Remote router reboot** capability through service calls (**Beta service!**)
 - **Register new devices switch** to control addition of new devices to the tracker or only update previously known devices.
+- **Parental Control switches** for ZTE F680: toggle the Enable state of parental-control rules already configured on the router
 - **Pause/resume scanning** to allow administrative access to router from other browsers
 - **Real-time statistics** including device counts and connection status
 - **Router details available as sensor attributes** (model, firmware, uptime, WAN info, etc.) Wan details and router details scans can be disabled to avoid extra load and warnings on unsupported models by setting the corresponding options to false.
@@ -156,6 +157,16 @@ To control whether newly discovered devices are added as `device_tracker` entiti
 
 - Entity: `switch.zte_register_new_devices`
 - State: `on` (new devices will be registered), `off` (only existing tracked devices are updated)
+
+## 👨‍👩‍👧 F680 Parental Control
+
+On the ZTE F680, zte_tracker can expose the router's pre-existing Parental Control entries as switches. The integration does not create or edit rules beyond toggling their existing `Enable` state.
+
+- One switch is created per existing router rule
+- The switch name comes from the rule `Name`
+- The switch state mirrors the router's live `Enable` value
+- `on` means the rule is enabled on the router; whether that allows or blocks Internet depends on how the rule is configured there
+- Configure the rules first in the router UI, then reload the integration if needed to discover newly added entries
 
 ## 🌐 Mesh Topology Support
 

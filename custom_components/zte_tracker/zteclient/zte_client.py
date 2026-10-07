@@ -94,7 +94,6 @@ _MODELS["H6745"] = _MODELS["H288A"]
 _MODELS["E2631"] = _MODELS["E2631"]
 _MODELS["SR7410"] = _MODELS["E2631"]
 _MODELS["SR7110"] = _MODELS["E2631"]
-_MODELS["F680"] = _MODELS["F6640"]
 # ZTE H2640: shares H288A's endpoints but the router verifies an
 # unencrypted SHA256 hex digest in the reboot Check header, not RSA-encrypted.
 # Also a VDSL/ADSL modem: WAN status via dsl_interface_status_lua.lua.
@@ -123,6 +122,13 @@ _MODELS["F6600P"] = {
     "tag_pon_optical_data": "optical_info_lua.lua",
 }
 _MODELS["F6745Q"] = _MODELS["F6600P"]
+# Distinct model, not a plain F6640 alias: only confirmed F680 units expose
+# parental-control data in firewall_parentctrl_lua.lua, so probing and switch
+# creation stay opt-in per model.
+_MODELS["F680"] = {
+    **_MODELS["F6640"],
+    "tag_parentctrl_data": "firewall_parentctrl_lua.lua",
+}
 
 
 class zteClient:
@@ -781,6 +787,22 @@ class zteClient:
         ]
 
     @staticmethod
+    def _parse_instance_fields(node: Any) -> dict[str, str]:
+        """Flatten raw ParaName and ParaValue pairs, preserving _InstID."""
+        parsed: dict[str, str] = {}
+        if node is None:
+            return parsed
+        children = list(node)
+        for i in range(0, len(children), 2):
+            name_elem = children[i]
+            value_elem = children[i + 1] if i + 1 < len(children) else None
+            pname = name_elem.text if name_elem is not None else None
+            pvalue = value_elem.text if value_elem is not None else None
+            if pname and pvalue:
+                parsed[pname] = pvalue
+        return parsed
+
+    @staticmethod
     def _parse_instance(node: Any, coerce_numeric: bool = True) -> dict[str, Any]:
         """Flatten a ZTE <Instance> node into a dict.
 
@@ -796,20 +818,111 @@ class zteClient:
         error, and the intent is clearer.
         """
         parsed: dict[str, Any] = {}
-        if node is None:
-            return parsed
-        children = list(node)
-        for i in range(0, len(children), 2):
-            name_elem = children[i]
-            value_elem = children[i + 1] if i + 1 < len(children) else None
-            pname = name_elem.text if name_elem is not None else None
-            pvalue = value_elem.text if value_elem is not None else None
-            if pname and pvalue and pname != "_InstID":
-                if coerce_numeric and pvalue.isdigit():
-                    parsed[pname] = int(pvalue)
-                else:
-                    parsed[pname] = pvalue
+        for pname, pvalue in zteClient._parse_instance_fields(node).items():
+            if pname == "_InstID":
+                continue
+            if coerce_numeric and pvalue.isdigit():
+                parsed[pname] = int(pvalue)
+            else:
+                parsed[pname] = pvalue
         return parsed
+
+    def get_parental_controls(self) -> list[dict[str, Any]]:
+        """Fetch the model-gated parental-control rules as HA switch state."""
+        tag = self.paths.get("tag_parentctrl_data")
+        if not tag or not self.session:
+            return []
+
+        try:
+            url = (
+                f"{self.base_url}/?_type={self.paths['type_main_request']}"
+                f"&_tag={tag}&_={self.get_guid()}"
+            )
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            self.log_request(r)
+            r.raise_for_status()
+            xml = self._parse_response(r.text)
+
+            error_str = xml.findtext("IF_ERRORSTR")
+            if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
+                raise Exception(f"Router error: {error_str}")
+
+            rules: list[dict[str, Any]] = []
+            for instance in xml.iterfind(".//Instance"):
+                fields = self._parse_instance_fields(instance)
+                inst_id = fields.get("_InstID")
+                enable = fields.get("Enable")
+                if not inst_id or enable is None:
+                    continue
+                rules.append(
+                    {
+                        "id": inst_id,
+                        "name": (fields.get("Name") or inst_id).strip(),
+                        "enabled": enable.strip().lower()
+                        in ("1", "true", "yes", "on"),
+                    }
+                )
+
+            # Names and counts only: rule names and MACs stay out of the log.
+            _LOGGER.debug(
+                "Parental controls: %d rule(s) parsed from %d instance(s), "
+                "top-level nodes %s",
+                len(rules),
+                len(xml.findall(".//Instance")),
+                [child.tag for child in xml][:10],
+            )
+            return sorted(rules, key=lambda rule: str(rule["id"]))
+        except Exception as ex:
+            _LOGGER.warning("Failed to fetch parental controls: %s", ex)
+            return []
+
+    def set_parental_control_enabled(self, inst_id: str, enabled: bool) -> bool:
+        """Toggle an existing parental-control rule on routers that expose it."""
+        tag = self.paths.get("tag_parentctrl_data")
+        if not tag or not self.session:
+            return False
+
+        try:
+            session_token = self.get_session_token()
+            if not session_token:
+                raise ValueError("Session token missing after login")
+
+            url = (
+                f"{self.base_url}/?_type={self.paths['type_main_request']}"
+                f"&_tag={tag}&_={self.get_guid()}"
+            )
+            r = self.session.post(
+                url,
+                data={
+                    "IF_ACTION": "Apply",
+                    "Enable": "1" if enabled else "0",
+                    "_InstID": inst_id,
+                    "_sessionTOKEN": session_token,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                verify=self.verify_ssl,
+                timeout=10,
+            )
+            self.log_request(r)
+            r.raise_for_status()
+            xml = self._parse_response(r.text)
+            error_str = xml.findtext("IF_ERRORSTR")
+            error_id = xml.findtext("IF_ERRORID")
+            if (error_id and error_id != "0") or (
+                error_str and error_str not in ("SUCC", "SUCCESS", "OK")
+            ):
+                raise Exception(
+                    f"Router error: {error_str or error_id or 'unknown error'}"
+                )
+            return True
+        except Exception as ex:
+            _LOGGER.warning(
+                "Failed to set parental-control rule %s to %s: %s",
+                inst_id,
+                enabled,
+                ex,
+            )
+            return False
 
     def _fetch_wan_status_xml(self) -> ET.Element:
         """GET the model's WAN status view, then its data page: the router only answers a data tag advertised by a preceding view request in the same session (#75)."""

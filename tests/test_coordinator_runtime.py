@@ -84,6 +84,8 @@ def _client(**kwargs):
         get_devices_response=Mock(return_value=[]),
         get_wan_status=Mock(return_value={}),
         get_router_details=Mock(return_value={}),
+        get_parental_controls=Mock(return_value=[]),
+        set_parental_control_enabled=Mock(return_value=True),
         _try_topology=Mock(return_value=None),
         login_data=None,
         session=None,
@@ -192,6 +194,7 @@ async def test_async_update_data_returns_cached_paused_state(mock_hass) -> None:
             "model": "F6640",
             "status": "paused",
         },
+        "parental_controls": [],
     }
     client.login.assert_not_called()
 
@@ -256,6 +259,91 @@ async def test_async_update_data_legacy_path_enriches_topology(mock_hass) -> Non
     assert result["router_info"]["WAN_connected"] is True
     assert result["router_info"]["ModelName"] == "F6600P"
     assert client.logout.called
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_includes_parental_controls(mock_hass) -> None:
+    """Successful polls should expose cached parental-control rules."""
+    client = _client(
+        get_devices_response=Mock(
+            return_value=[
+                {
+                    "HostName": "Phone",
+                    "IPAddress": "10.0.0.2",
+                    "MACAddress": "AA:BB",
+                    "Active": True,
+                    "NetworkType": "WLAN",
+                }
+            ]
+        ),
+        get_parental_controls=Mock(
+            return_value=[
+                {"id": "DEV.PCUser1", "name": "Tv zal", "enabled": False}
+            ]
+        ),
+    )
+    coordinator = _make_coordinator(mock_hass, _entry(), client)
+
+    result = await coordinator._async_update_data()
+
+    assert result["parental_controls"] == [
+        {"id": "DEV.PCUser1", "name": "Tv zal", "enabled": False}
+    ]
+    assert coordinator._parental_controls_cache == result["parental_controls"]
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_survives_parental_control_fetch_failures(
+    mock_hass,
+) -> None:
+    """Parent-control probe failures should not break normal tracking."""
+    client = _client(
+        get_devices_response=Mock(
+            return_value=[
+                {
+                    "HostName": "Phone",
+                    "IPAddress": "10.0.0.2",
+                    "MACAddress": "AA:BB",
+                    "Active": True,
+                    "NetworkType": "WLAN",
+                }
+            ]
+        ),
+        get_parental_controls=Mock(side_effect=RuntimeError("boom")),
+    )
+    coordinator = _make_coordinator(mock_hass, _entry(), client)
+
+    result = await coordinator._async_update_data()
+
+    assert result["devices"]["AA:BB"]["name"] == "Phone"
+    assert result["parental_controls"] == []
+    assert result["router_info"]["status"] == "connected"
+
+
+@pytest.mark.asyncio
+async def test_async_set_parental_control_enabled_re_reads_router_state(
+    mock_hass,
+) -> None:
+    """Switch writes should trust the router's fresh readback, not the request."""
+    client = _client(
+        get_parental_controls=Mock(
+            return_value=[{"id": "DEV.PCUser1", "name": "Tv zal", "enabled": True}]
+        )
+    )
+    coordinator = _make_coordinator(mock_hass, _entry(), client)
+    coordinator.data = {
+        "devices": {},
+        "router_info": {"status": "connected"},
+        "parental_controls": [{"id": "DEV.PCUser1", "name": "Tv zal", "enabled": False}],
+    }
+
+    assert await coordinator.async_set_parental_control_enabled(
+        "DEV.PCUser1", True
+    ) is True
+    client.set_parental_control_enabled.assert_called_once_with("DEV.PCUser1", True)
+    assert coordinator.data["parental_controls"] == [
+        {"id": "DEV.PCUser1", "name": "Tv zal", "enabled": True}
+    ]
 
 
 @pytest.mark.asyncio
