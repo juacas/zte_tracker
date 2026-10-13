@@ -310,6 +310,54 @@ def test_device_request_relogs_in_after_router_session_timeout() -> None:
     new_session.get.assert_called_once_with("http://router/data")
 
 
+def test_device_request_raises_when_relogin_fails() -> None:
+    """A failed re-login should surface instead of retrying without a session."""
+    client = _make_client()
+    old_session = MagicMock()
+    client.session = old_session
+    client.login_data = {"login_need_refresh": 0}
+    client.login = Mock(return_value=False)
+
+    old_session.get.return_value = _response(
+        text=(
+            "<ajax_response_xml_root><IF_ERRORSTR>SessionTimeout</IF_ERRORSTR>"
+            "</ajax_response_xml_root>"
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="Unable to re-login"):
+        client._request_with_session_retry("GET", "http://router/data")
+
+    old_session.close.assert_called_once()
+    assert client.session is None
+    old_session.get.assert_called_once_with("http://router/data")
+
+
+def test_device_request_retries_only_once_while_session_keeps_timing_out() -> None:
+    """A retried request that times out again should be returned, not retried in a loop."""
+    client = _make_client()
+    old_session = MagicMock()
+    new_session = MagicMock()
+    client.session = old_session
+    client.login_data = {"login_need_refresh": 0}
+    client.login = Mock(side_effect=lambda: _replace_session(client, new_session))
+
+    timeout = _response(
+        text=(
+            "<ajax_response_xml_root><IF_ERRORSTR>SessionTimeout</IF_ERRORSTR>"
+            "</ajax_response_xml_root>"
+        )
+    )
+    old_session.get.return_value = timeout
+    new_session.get.return_value = timeout
+
+    response = client._request_with_session_retry("GET", "http://router/data")
+
+    assert response is timeout
+    client.login.assert_called_once()
+    new_session.get.assert_called_once_with("http://router/data")
+
+
 def _replace_session(client: zteClient, session: MagicMock) -> bool:
     client.session = session
     client.login_data = {"login_need_refresh": 0}

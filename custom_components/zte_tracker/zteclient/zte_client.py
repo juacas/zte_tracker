@@ -54,7 +54,7 @@ _MODELS = {
         "tag_wan_status_view": "ethWanStatus&Menu3Location=0",
         "tag_wan_status_data": "wan_internetstatus_lua.lua&TypeUplink=2&pageType=1",
         "default_scheme": "https",
-    },
+    },    
     "H388X": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
         "wlan_id_element": "OBJ_ACCESSDEV_ID",
@@ -467,6 +467,7 @@ class zteClient:
             return response
 
         self._invalidate_session()
+        _LOGGER.debug("SessionTimeout, logging in again: %s", url)
         if not self.login():
             raise RuntimeError("Unable to re-login after SessionTimeout")
 
@@ -1240,7 +1241,7 @@ class zteClient:
 
             post_data = f"IF_ACTION=Restart&Btn_restart=&_sessionTOKEN={session_token}"
             digest_str = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
-            if self.paths.get("reboot_check_encrypted", True):
+            if self.paths.get("reboot_check_encrypted", True):            
                 # F6600P uses a 4096-bit RSA key, other models use 2048-bit
                 if self.model == "F6600P":
                     pub_key_pem = (
