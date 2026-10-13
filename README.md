@@ -191,6 +191,7 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 | ZTE F6745Q  |     F6745Q      |    ✅    |
 | ZTE F6600P  |     F6600P      |    ✅    |
 | ZTE F8748   |      F8748      |    ✅    |
+| ZTE F6601P  |     F6601P      |    ✅    |
 | ZTE H168A V2.1 |     H168A      |    ✅    |
 | ZTE H169A     |      H169A      |    ✅    |
 | ZTE H2640     |      H2640      |    ✅    |
@@ -417,6 +418,7 @@ pytest custom_components/zte_tracker/tests/
 - **@gradypark86** for SR7410 verification
 - **@LeMehdi0** for F6745Q support bundle (#106)
 - **@enisyugnak** for H168A support bundle (#112)
+- **@vietxuandev** for F6601P verification
 
 
 ## 📄 License
