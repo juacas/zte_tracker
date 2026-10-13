@@ -181,9 +181,14 @@ async def async_setup_entry(
                     except ValueError:
                         # Nameless entity: HA only allows the area on its device.
                         reg_ent = entity_registry.async_get(entity_id)
-                        if reg_ent and reg_ent.device_id:
+                        device = (
+                            device_registry.async_get(reg_ent.device_id)
+                            if reg_ent and reg_ent.device_id
+                            else None
+                        )
+                        if device and not device.area_id:
                             device_registry.async_update_device(
-                                reg_ent.device_id, area_id=area_id
+                                device.id, area_id=area_id
                             )
 
     # Add initial entities

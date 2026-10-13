@@ -352,6 +352,55 @@ async def test_device_tracker_setup_creates_entities_and_assigns_area(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "device_id,device_area,expect_update",
+    [("dev-1", None, True), ("dev-1", "kitchen", False), (None, None, False)],
+)
+async def test_device_tracker_setup_nameless_entity_area_goes_to_device(
+    mock_hass, device_id, device_area, expect_update
+) -> None:
+    """HA rejects an entity area on a nameless entity; the setup must survive."""
+    entry = _entry()
+    coordinator = _coordinator(
+        devices={"AA:BB": {"name": "Phone", "active": True, "last_seen": "now"}}
+    )
+    mock_hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+    collector = _Collector()
+    device_registry = Mock()
+    device_registry.async_get_or_create.return_value = SimpleNamespace(
+        id="router-device-id", area_id="office"
+    )
+    entity_registry = Mock()
+    entity_registry.entities = {}
+    entity_registry.async_get_entity_id.return_value = "device_tracker.phone"
+    entity_registry.async_update_entity.side_effect = ValueError("nameless")
+    entity_registry.async_get.return_value = SimpleNamespace(device_id=device_id)
+    device_registry.async_get.return_value = SimpleNamespace(
+        id="dev-1", area_id=device_area
+    )
+
+    with (
+        patch(
+            "custom_components.zte_tracker.device_tracker.dr.async_get",
+            return_value=device_registry,
+        ),
+        patch(
+            "custom_components.zte_tracker.device_tracker.er.async_get",
+            return_value=entity_registry,
+        ),
+    ):
+        await device_tracker.async_setup_entry(mock_hass, entry, collector.add_entities)
+
+    assert len(collector.entities) == 1
+    if expect_update:
+        device_registry.async_update_device.assert_called_once_with(
+            "dev-1", area_id="office"
+        )
+    else:
+        device_registry.async_update_device.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_device_tracker_setup_respects_registration_flag(mock_hass) -> None:
     """New devices should be skipped when registration is disabled."""
     entry = _entry()
