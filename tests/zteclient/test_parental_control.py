@@ -107,6 +107,19 @@ class TestParentalControl(TestCase):
         self.assertNotIn("Tv zal", output)
         self.assertNotIn("AA:BB:CC:DD:EE:FF", output)
 
+    def test_get_parental_controls_logs_why_it_was_skipped(self):
+        client = _make_client()
+        client.model = "F6640"
+        client.paths = {"type_main_request": "menuData"}
+
+        with self.assertLogs(level="DEBUG") as logs:
+            self.assertEqual(client.get_parental_controls(), [])
+
+        output = "\n".join(logs.output)
+        self.assertIn("model=F6640", output)
+        self.assertIn("has_parentctrl_tag=False", output)
+        client.session.get.assert_not_called()
+
     def test_get_parental_controls_logs_empty_response(self):
         client = _make_client()
         response = MagicMock(

@@ -85,6 +85,11 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             query_router_details=query_router,
             mesh_topology=self._mesh_topology,
         )
+        _LOGGER.debug(
+            "ZTE client ready: model=%s parental_controls_supported=%s",
+            getattr(self.client, "model", None),
+            bool(getattr(self.client, "paths", {}).get("tag_parentctrl_data")),
+        )
         self._available = True
         self._paused = False
         self._register_new_devices = entry.options.get(CONF_REGISTER_NEW_DEVICES, True)

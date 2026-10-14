@@ -831,6 +831,13 @@ class zteClient:
         """Fetch the model-gated parental-control rules as HA switch state."""
         tag = self.paths.get("tag_parentctrl_data")
         if not tag or not self.session:
+            _LOGGER.debug(
+                "Parental controls skipped: model=%s has_parentctrl_tag=%s "
+                "has_session=%s (only the F680 profile exposes parental controls)",
+                self.model,
+                bool(tag),
+                bool(self.session),
+            )
             return []
 
         try:
