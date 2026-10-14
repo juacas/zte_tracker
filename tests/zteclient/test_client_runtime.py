@@ -60,8 +60,19 @@ def test_init_resolves_scheme_models_and_profiles() -> None:
     assert http_client.verify_ssl is False
     profiles = zteClient.get_profiles()
     assert "F6640" in profiles
+    assert "F680" in profiles
     assert "F8748" in profiles
     assert "H288A" in profiles
+
+
+def test_parental_control_profile_is_gated_to_f680_only() -> None:
+    """Only F680 should advertise the parental-control endpoint."""
+    assert (
+        zte_client_module._MODELS["F680"]["tag_parentctrl_data"]
+        == "firewall_parentctrl_lua.lua"
+    )
+    for model in ("F6640", "F6645P", "F8748", "F6600P", "F6745Q"):
+        assert "tag_parentctrl_data" not in zte_client_module._MODELS[model]
 
 
 def test_setup_session_sets_headers_and_mesh_preflight() -> None:

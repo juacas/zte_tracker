@@ -35,6 +35,15 @@ PROFILES = {
         "type_main_request": "menuData",
         "parse_wan_traffic": True,
     },
+    "F680": {
+        "wlan_script": "wlan_client_stat_lua.lua",
+        "lan_script": "accessdev_landevs_lua.lua",
+        "tag_wan_status_view": "ethWanStatus",
+        "tag_wan_status_data": "wan_internetstatus_lua.lua",
+        "tag_parentctrl_data": "firewall_parentctrl_lua.lua",
+        "type_first_request": "menuView",
+        "type_main_request": "menuData",
+    },
     "H288A": {
         "wlan_script": "accessdev_ssiddev_lua.lua",
         "lan_script": "accessdev_landevs_lua.lua",
@@ -186,8 +195,8 @@ class TestHappyPath(BundleTest):
         self.assertEqual(analysis["best_matching_profile"], "F6640")
         self.assertEqual(analysis["configured_profile_name"], "F6640")
         self.assertTrue(analysis["configured_profile_answered"])
-        # F8748 shares every endpoint, so probing cannot separate the two.
-        self.assertEqual(analysis["tied_profiles"], ["F6640", "F8748"])
+        # F8748 and F680 share the same LAN/WLAN probes with F6640.
+        self.assertEqual(analysis["tied_profiles"], ["F6640", "F680", "F8748"])
 
     def test_the_file_carries_no_internal_plumbing(self):
         """Scoring needs the owners map and the resolved profile name; a
@@ -226,6 +235,24 @@ class TestHappyPath(BundleTest):
 
 
 class TestOpenIssues(BundleTest):
+    def test_f680_parental_control_endpoint_is_probed(self):
+        parentctrl = (
+            "<ajax_response_xml_root>"
+            f"{ENVELOPE}"
+            "<Instance><ParaName>_InstID</ParaName><ParaValue>DEV.PCUser1</ParaValue>"
+            "<ParaName>Enable</ParaName><ParaValue>1</ParaValue></Instance>"
+            "</ajax_response_xml_root>"
+        )
+        router = _Router(
+            {"firewall_parentctrl_lua.lua": _Response(parentctrl)}
+        )
+        router.model = "F680"
+        router.paths = PROFILES["F680"]
+
+        bundle = self.bundle(router)
+
+        self.assertIn("F680_parentctrl", bundle["probes"])
+
     def test_issue_40_an_empty_answer_is_not_a_match(self):
         """Connects, lists no devices. The envelope must not count as records."""
         router = _Router(
