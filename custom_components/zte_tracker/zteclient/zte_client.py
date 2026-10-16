@@ -89,7 +89,17 @@ _MODELS["H168A"] = {
 _MODELS["F6645P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
 _MODELS["H6645P"] = _MODELS["H288A"]
-_MODELS["H3640"] = _MODELS["H288A"]
+# ZTE H3640: shares H288A's endpoints but the WAN data tag
+# wan_internetstatus_lua.lua&TypeUplink=2&pageType=1 is not served by
+# recent H3640 firmwares - the router answers IF_ERRORSTR SessionTimeout.
+# Re-login and retry does not help (the tag is missing, not the session,
+# so the #75 retry path cannot recover either). The wan_internet_lua.lua
+# variant works on those firmwares and returns the same
+# ID_WAN_COMFIG/Instance XML shape - same override as H388X (#44).
+_MODELS["H3640"] = {
+    **_MODELS["H288A"],
+    "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1",
+}
 _MODELS["H6745"] = _MODELS["H288A"]
 _MODELS["E2631"] = _MODELS["E2631"]
 _MODELS["SR7410"] = _MODELS["E2631"]
