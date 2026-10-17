@@ -202,10 +202,13 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 | ZTE H6745 V3  |      H6745      |    ✅    |
 | ZTE AX3000    |      E2631      |    ✅    |
 | ZTE SR7410 (ZTE BE7200 Pro+)   |      SR7410      |    ✅    |
+| ZTE E2633 (China Mobile firmware V1.0.4) |      E2633      |    ⚠️    |
 
 > **Note**: This integration may work with additional ZTE router models. Try one of the above parameter values to test compatibility.
 
 > **Not listed?** Try each value above first, then run [`zte_tracker.export_support_bundle`](#zte_trackerexport_support_bundle) and attach the file to an issue.
+
+> **E2633 note**: WiFi clients only (2.4G/5G band, RSSI, WiFi mode, rx/tx rate). The login is a form with a `Check` header (SHA-256 of the POST body), measured from a browser session. There is no known endpoint yet for WAN status, router details, wired LAN ports or reboot, so those return empty and no Reboot button is created. The login/read flow is covered by tests against a local fake server and was reproduced once against a real E2633 with a standalone script; it has not been run inside Home Assistant yet, hence ⚠️. The `rx_rate`/`tx_rate` values are the router's raw `RxRateBps`/`TxRateBps` and their unit is unconfirmed. The connected-devices sensor also carries a `clients` attribute: a list of `mac, ip, name, band, rssi, mode, rx_rate, tx_rate` for active WiFi clients.
 
 > **F8748 note**: Verified on a unit provided by **DIGI Portugal** (firmware `V3.0.10P2N4`, hardware `V3.0.03`). It shares the F6640 web-console endpoints, and is defined as a distinct model because this firmware additionally exposes **WAN traffic counters** in `wan_internetstatus_lua.lua`. When the model is `F8748`, the integration parses those into extra router-status attributes: `WAN_rx_bytes`, `WAN_tx_bytes`, `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors`. This is gated to `F8748` so other F6640-family routers are unaffected (we could not confirm they populate the same fields). DIGI units in other countries (e.g. Spain, Romania) are likely identical; F8748 units from other providers or bought retail may expose additional pages/data we could not confirm.
 

@@ -351,6 +351,10 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 "network_type": device.get("NetworkType", "Unknown"),
                 "last_seen": datetime.now().isoformat(),
                 "port": device.get("Port", ""),  # LAN port or WLAN ESSID
+                "rssi": device.get("Rssi"),
+                "wireless_mode": device.get("WirelessMode", ""),
+                "rx_rate": device.get("RxRate"),
+                "tx_rate": device.get("TxRate"),
                 "LinkTime": device.get("LinkTime", ""),
                 "ConnectTime": device.get("ConnectTime", ""),
                 "mesh_node": device.get("MeshNode", ""),
