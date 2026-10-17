@@ -14,6 +14,7 @@ from homeassistant.util import dt as ha_dt
 
 from .const import DOMAIN, ICON
 from .coordinator import ZteDataCoordinator
+from .zteclient.zte_client import cmcc_wifi_clients
 
 
 async def async_setup_entry(
@@ -115,4 +116,6 @@ class ZteDeviceCountSensor(ZteBaseSensor):
         return {
             "devices": device_list,
             "num_devices": len([d for d in devices.values() if d.get("active")]),
+            # Active WiFi clients: mac, ip, name, band, rssi, mode, rx_rate, tx_rate.
+            "clients": cmcc_wifi_clients(devices),
         }
