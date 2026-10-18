@@ -133,6 +133,7 @@ _MODELS["F6600P"] = {
     "tag_pon_optical_data": "optical_info_lua.lua",
 }
 _MODELS["F6745Q"] = _MODELS["F6600P"]
+_MODELS["F6601P"] = _MODELS["F6640"]
 
 
 class zteClient:
@@ -447,6 +448,43 @@ class zteClient:
             _LOGGER.error("Error getting device response: %s", e)
             return None
 
+    def _response_is_session_timeout(self, response: requests.Response) -> bool:
+        """Return whether the router rejected the request at the application layer."""
+        try:
+            xml = self._parse_response(response.text)
+        except (ET.ParseError, TypeError, ValueError):
+            return False
+        error_str = xml.findtext("IF_ERRORSTR")
+        return error_str == "SessionTimeout"
+
+    def _invalidate_session(self) -> None:
+        """Discard cached authentication without making another router request."""
+        if self.session:
+            self.session.close()
+        self.session = None
+        self.login_data = None
+
+    def _request_with_session_retry(
+        self, method: str, url: str, **kwargs: Any
+    ) -> requests.Response:
+        """Make one request and retry once after a router-level session timeout."""
+        if not self.session:
+            raise RuntimeError("Session not initialized")
+
+        request = getattr(self.session, method.lower())
+        response = request(url, **kwargs)
+        if not self._response_is_session_timeout(response):
+            return response
+
+        self._invalidate_session()
+        _LOGGER.debug("SessionTimeout, logging in again: %s", url)
+        if not self.login():
+            raise RuntimeError("Unable to re-login after SessionTimeout")
+
+        if not self.session:
+            raise RuntimeError("Session not initialized after re-login")
+        return getattr(self.session, method.lower())(url, **kwargs)
+
     def get_lan_devices(self) -> list[dict[str, Any]] | None:
         """Get the list of devices connected to the LAN ports."""
         try:
@@ -454,7 +492,8 @@ class zteClient:
                 raise RuntimeError("Session not initialized")
 
             # First request to set up context
-            r = self.session.get(
+            r = self._request_with_session_retry(
+                "GET",
                 f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
                 verify=self.verify_ssl,
                 timeout=10,
@@ -464,7 +503,9 @@ class zteClient:
 
             # Main request for LAN devices
             lan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['lan_script']}&_={self.get_guid()}"
-            r = self.session.get(lan_request, verify=self.verify_ssl, timeout=10)
+            r = self._request_with_session_retry(
+                "GET", lan_request, verify=self.verify_ssl, timeout=10
+            )
             self.log_request(r)
             r.raise_for_status()
 
@@ -488,11 +529,14 @@ class zteClient:
             try:
                 # Try direct request first
                 wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
-                r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
+                r = self._request_with_session_retry(
+                    "GET", wlan_request, verify=self.verify_ssl, timeout=10
+                )
                 r.raise_for_status()
             except Exception:
                 # Fallback to full setup if direct request fails
-                r = self.session.get(
+                r = self._request_with_session_retry(
+                    "GET",
                     f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
                     verify=self.verify_ssl,
                     timeout=10,
@@ -500,7 +544,9 @@ class zteClient:
                 r.raise_for_status()
 
                 wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
-                r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
+                r = self._request_with_session_retry(
+                    "GET", wlan_request, verify=self.verify_ssl, timeout=10
+                )
                 r.raise_for_status()
 
             self.log_request(r)
