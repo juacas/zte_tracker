@@ -1,5 +1,6 @@
 """Unit tests for F680 parental-control parsing and writes."""
 
+import base64
 import sys
 from pathlib import Path
 from unittest import TestCase
@@ -35,9 +36,12 @@ def _make_client():
     client_cls = _load_client()
     client = object.__new__(client_cls)
     client.paths = {
+        "type_first_request": "menuView",
         "type_main_request": "menuData",
+        "tag_parentctrl_view": "parentCtrl&Menu3Location=0",
         "tag_parentctrl_data": "firewall_parentctrl_lua.lua",
     }
+    client.model = "F680"
     client.base_url = "http://192.168.1.1"
     client.verify_ssl = False
     client.guid = 1
@@ -65,33 +69,107 @@ class TestParentalControl(TestCase):
         self.assertIn("?_type=menuData", request_url)
         self.assertIn("_tag=firewall_parentctrl_lua.lua", request_url)
 
-    def test_set_parental_control_enabled_posts_expected_form_fields(self):
+    def test_set_parental_control_enabled_posts_signed_form(self):
         client = _make_client()
+        view = MagicMock(
+            text="var _sessionTmpToken = \"ab\\x2dcd\";", request=None
+        )
+        view.raise_for_status = Mock()
         response = MagicMock(text=SUCCESS, request=None)
         response.raise_for_status = Mock()
+        client.session.get.return_value = view
         client.session.post.return_value = response
-        client.get_session_token = Mock(return_value="session-token")
 
         self.assertTrue(
             client.set_parental_control_enabled("DEV.PCUser1", enabled=True)
         )
 
+        view_url = client.session.get.call_args.args[0]
+        self.assertIn("?_type=menuView", view_url)
+        self.assertIn("_tag=parentCtrl&Menu3Location=0", view_url)
         kwargs = client.session.post.call_args.kwargs
         self.assertEqual(
             kwargs["data"],
-            {
-                "IF_ACTION": "Apply",
-                "Enable": "1",
-                "_InstID": "DEV.PCUser1",
-                "_sessionTOKEN": "session-token",
-            },
+            "IF_ACTION=Apply&Enable=1&_InstID=DEV.PCUser1&_sessionTOKEN=ab-cd",
         )
-        self.assertEqual(
-            kwargs["headers"]["Content-Type"], "application/x-www-form-urlencoded"
+        # RSA PKCS#1 v1.5 is randomised, so check only the 2048-bit ciphertext size.
+        self.assertEqual(len(base64.b64decode(kwargs["headers"]["Check"])), 256)
+        self.assertIn(
+            "application/x-www-form-urlencoded", kwargs["headers"]["Content-Type"]
         )
         request_url = client.session.post.call_args.args[0]
         self.assertIn("?_type=menuData", request_url)
         self.assertIn("_tag=firewall_parentctrl_lua.lua", request_url)
+
+    def test_set_parental_control_enabled_rejects_unrecognised_response(self):
+        client = _make_client()
+        view = MagicMock(text="var _sessionTmpToken = \"t\";", request=None)
+        view.raise_for_status = Mock()
+        response = MagicMock(text="<html></html>", request=None)
+        response.raise_for_status = Mock()
+        client.session.get.return_value = view
+        client.session.post.return_value = response
+
+        self.assertFalse(
+            client.set_parental_control_enabled("DEV.PCUser1", enabled=True)
+        )
+
+    def test_get_parental_controls_returns_none_on_failure(self):
+        client = _make_client()
+        client.session.get.side_effect = RuntimeError("boom")
+
+        self.assertIsNone(client.get_parental_controls())
+
+    def test_get_parental_controls_rejects_non_data_responses(self):
+        bodies = (
+            "<html></html>",
+            "<ajax_response_xml_root><IF_ERRORID>-1</IF_ERRORID>"
+            "</ajax_response_xml_root>",
+        )
+        for body in bodies:
+            client = _make_client()
+            response = MagicMock(text=body, request=None)
+            response.raise_for_status = Mock()
+            client.session.get.return_value = response
+            self.assertIsNone(client.get_parental_controls(), body)
+
+    def test_get_parental_controls_without_session_is_a_failure(self):
+        client = _make_client()
+        client.session = None
+
+        self.assertIsNone(client.get_parental_controls())
+
+    def test_get_parental_controls_empty_rule_list_is_valid(self):
+        client = _make_client()
+        body = (
+            "<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR>"
+            "<IF_ERRORID>0</IF_ERRORID></ajax_response_xml_root>"
+        )
+        response = MagicMock(text=body, request=None)
+        response.raise_for_status = Mock()
+        client.session.get.return_value = response
+
+        self.assertEqual(client.get_parental_controls(), [])
+
+    def test_check_header_key_size_follows_model(self):
+        for model, size in (("F680", 256), ("F6600P", 512)):
+            client = _make_client()
+            client.model = model
+            check = client._check_header("a=b")
+            self.assertEqual(len(base64.b64decode(check)), size)
+
+    def test_check_header_unencrypted_is_plain_sha256(self):
+        import hashlib
+
+        client = _make_client()
+        self.assertEqual(
+            client._check_header("a=b", False),
+            hashlib.sha256(b"a=b").hexdigest(),
+        )
+
+    def test_check_header_is_not_logged(self):
+        client = _make_client()
+        self.assertIn("check", client._SENSITIVE_HEADERS)
 
     def test_get_parental_controls_logs_counts_without_rule_names(self):
         client = _make_client()

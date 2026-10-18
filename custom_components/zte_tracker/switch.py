@@ -167,6 +167,16 @@ class ZteParentalControlSwitch(CoordinatorEntity, SwitchEntity):
         return None
 
     @property
+    def available(self) -> bool:
+        """Unavailable while the router's rule list cannot be read."""
+        return (
+            super().available
+            and getattr(self.coordinator, "available", True)
+            and getattr(self.coordinator, "parental_controls_ok", True)
+            and self._rule() is not None
+        )
+
+    @property
     def is_on(self) -> bool:
         """Return the router-side Enable flag."""
         rule = self._rule()

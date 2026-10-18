@@ -97,6 +97,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         self._stable_count = 0
         self._device_cache: dict[str, dict[str, Any]] = {}
         self._parental_controls_cache: list[dict[str, Any]] = []
+        self.parental_controls_ok = True
         self._last_successful_update: datetime | None = None
         self._last_login_at: datetime | None = None
         self._client_lock = asyncio.Lock()
@@ -399,8 +400,10 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         self, inst_id: str, enabled: bool
     ) -> bool:
         """Toggle one router-side parental-control rule and re-read its state."""
+        written = False
 
         def _set_parental_control() -> list[dict[str, Any]] | None:
+            nonlocal written
             had_session = (
                 self.client.login_data is not None
                 and self.client.session is not None
@@ -418,6 +421,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                     self._last_login_at = datetime.now()
                 if not self.client.set_parental_control_enabled(inst_id, enabled):
                     return None
+                written = True
                 return self.client.get_parental_controls()
             finally:
                 if not self._reuse_session:
@@ -431,6 +435,12 @@ class ZteDataCoordinator(DataUpdateCoordinator):
             parental_controls = await self.hass.async_add_executor_job(
                 _set_parental_control
             )
+
+        if parental_controls is None and written:
+            # The write may have applied; stop showing the old state as current.
+            self.parental_controls_ok = False
+            self.async_set_updated_data(dict(self.data or {}))
+            return False
 
         if not parental_controls:
             return False
@@ -448,6 +458,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
 
         copied = self._copy_parental_controls(parental_controls)
         self._parental_controls_cache = copied
+        self.parental_controls_ok = True
         data = dict(self.data or {})
         data["parental_controls"] = self._copy_parental_controls(copied)
         self.async_set_updated_data(data)
@@ -498,7 +509,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                     parental_controls = self.client.get_parental_controls()
                 except Exception as ex:
                     _LOGGER.warning("Failed to fetch parental controls: %s", ex)
-                    parental_controls = []
+                    parental_controls = None
 
                 # Mesh topology enrichment (before logout!)
                 if devices is not None and self._mesh_topology:
@@ -601,7 +612,7 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                         parental_controls = self.client.get_parental_controls()
                     except Exception as ex:
                         _LOGGER.warning("Failed to fetch parental controls: %s", ex)
-                        parental_controls = []
+                        parental_controls = None
 
                     # Mesh topology enrichment (session still alive)
                     if devices is not None and self._mesh_topology:
@@ -685,7 +696,14 @@ class ZteDataCoordinator(DataUpdateCoordinator):
         # Have info to return. Tracker is working.
         self._available = True
         self._last_successful_update = datetime.now()
-        self._parental_controls_cache = self._copy_parental_controls(parental_controls)
+        if parental_controls is None:
+            # Read failed: keep the last known rules but flag the switches.
+            self.parental_controls_ok = False
+        else:
+            self.parental_controls_ok = True
+            self._parental_controls_cache = self._copy_parental_controls(
+                parental_controls
+            )
 
         # Process devices with caching
         processed_devices = self._merge_device_data(devices)

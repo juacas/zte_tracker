@@ -278,6 +278,13 @@ async def test_parental_control_switches_setup_and_toggle_behaviors(
     )
     assert parental_switch.is_on is False
 
+    coordinator.parental_controls_ok = False
+    assert parental_switch.available is False
+    coordinator.parental_controls_ok = True
+    assert parental_switch.available is True
+    coordinator.available = False
+    assert parental_switch.available is False
+
 
 @pytest.mark.asyncio
 async def test_non_f680_models_do_not_create_parental_control_switches(
