@@ -208,7 +208,13 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 
 > **Not listed?** Try each value above first, then run [`zte_tracker.export_support_bundle`](#zte_trackerexport_support_bundle) and attach the file to an issue.
 
-> **E2633 note**: WiFi clients only (2.4G/5G band, RSSI, WiFi mode, rx/tx rate). The login is a form with a `Check` header (SHA-256 of the POST body), measured from a browser session. There is no known endpoint yet for WAN status, router details, wired LAN ports or reboot, so those return empty and no Reboot button is created. The login/read flow is covered by tests against a local fake server and was reproduced once against a real E2633 with a standalone script; it has not been run inside Home Assistant yet, hence ⚠️. The `rx_rate`/`tx_rate` values are the router's raw `RxRateBps`/`TxRateBps` and their unit is unconfirmed. The connected-devices sensor also carries a `clients` attribute: a list of `mac, ip, name, band, rssi, mode, rx_rate, tx_rate` for active WiFi clients.
+> **E2633 note**: WiFi clients only (2.4G/5G band, RSSI, WiFi mode, rx/tx rate). The login is a form with a `Check` header (SHA-256 of the POST body), measured from a browser session. There is no known endpoint yet for WAN status, router details, wired LAN ports or reboot, so those return empty and no Reboot button is created. The login/read flow is covered by tests against a local fake server and was reproduced once against a real E2633 with a standalone script; it has not been run inside Home Assistant yet, hence ⚠️. The `rx_rate`/`tx_rate` values are the router's raw `RxRateBps`/`TxRateBps` and their unit is unconfirmed.
+>
+> - **A failed read is an error**, not an empty list: if the client list cannot be read the router is reported `unavailable` and tracked devices keep their last state (for up to 10 minutes, the integration's existing cache window).
+> - **Session**: no logout request is known for the E2633, so none is sent; the router ends the session on its own timeout. On logout the integration only closes its own HTTP session. With the default settings it logs in again on every poll; turning on the *Persistent session* option keeps one session between polls.
+> - **Login pause**: if the router *refuses* a login (wrong credentials, account locked) the integration waits 30 minutes before trying again, so the admin account is not locked out. A network error or an HTTP error does not start this pause.
+> - The connected-devices sensor of an E2633 also carries a `clients` attribute: a list of `mac, ip, name, band, rssi, mode, rx_rate, tx_rate` for active WiFi clients. It is cut to fit the recorder's 16 KB attribute limit; when it is cut, `clients_truncated` is `true`. The same values are on each device tracker entity.
+> - Help wanted: a debug log from a real E2633 in Home Assistant. See [How to collect a redacted debug log](#how-to-collect-a-redacted-debug-log).
 
 > **F8748 note**: Verified on a unit provided by **DIGI Portugal** (firmware `V3.0.10P2N4`, hardware `V3.0.03`). It shares the F6640 web-console endpoints, and is defined as a distinct model because this firmware additionally exposes **WAN traffic counters** in `wan_internetstatus_lua.lua`. When the model is `F8748`, the integration parses those into extra router-status attributes: `WAN_rx_bytes`, `WAN_tx_bytes`, `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors`. This is gated to `F8748` so other F6640-family routers are unaffected (we could not confirm they populate the same fields). DIGI units in other countries (e.g. Spain, Romania) are likely identical; F8748 units from other providers or bought retail may expose additional pages/data we could not confirm.
 
@@ -369,6 +375,31 @@ logger:
   logs:
     custom_components.zte_tracker: debug
 ```
+
+### How to collect a redacted debug log
+
+A debug log from a real run is the most useful thing to attach to an issue (for example when a new model is added or a router stops answering). It contains MAC addresses, IP addresses and possibly device names, so redact it first.
+
+1. Enable debug logging for the integration (`configuration.yaml`, then restart Home Assistant), or without a restart from Developer tools → Actions → `logger.set_level` with `custom_components.zte_tracker: debug`:
+
+   ```yaml
+   logger:
+     default: info
+     logs:
+       custom_components.zte_tracker: debug
+       custom_components.zte_tracker.zteclient.zte_client: debug
+   ```
+
+2. Capture the part you want to show. For a login problem, reload the integration (Settings → Devices & services → ZTE → ⋮ → Reload) so the setup and the first login are in the log. For a session problem, let a few poll cycles run and keep logging until the session has expired and the integration has logged in again.
+3. Download the log: Settings → System → Logs → *Download full log* (`home-assistant.log`).
+4. Redact it with the script in this repository (Python 3, no packages needed). It masks MAC and IP addresses (the same address always gets the same placeholder), passwords, user names, session and login tokens, cookies, the `Check` header, SHA-256 hashes, host names and SSIDs:
+
+   ```bash
+   grep zte_tracker home-assistant.log | python3 scripts/redact_log.py > redacted.log
+   ```
+
+5. **Read `redacted.log` before posting it.** The script is a best-effort filter: also remove device names, SSIDs, your public IP, IPv6 addresses and anything else you would not publish.
+6. Attach the file to the issue and set the log level back to `info`.
 
 ## 🔄 Migration from Legacy Versions
 
