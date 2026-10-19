@@ -34,47 +34,53 @@ warnings.filterwarnings(
 _LOGGER = logging.getLogger(__name__)
 
 _CMCC_TOKEN_RE = re.compile(r'addParameter\("_sessionTOKEN",\s*"(\d+)"\)')
-_CMCC_TOKEN_DANG_NHAP = "/function_module/login_module/login_page/logintoken_lua.lua"
-_CMCC_DU_LIEU = "/getpage.lua?pid=1005&nextpage=topo_lua.lua&Action={}"
+_CMCC_LOGIN_TOKEN_PATH = "/function_module/login_module/login_page/logintoken_lua.lua"
+_CMCC_DATA_PATH = "/getpage.lua?pid=1005&nextpage=topo_lua.lua&Action={}"
 _CMCC_MAC_RE = re.compile(r"[0-9A-F]{2}(:[0-9A-F]{2}){5}")
 _CMCC_BAND = {"1": "2.4G", "2": "5G"}
-# After a failed login do not retry for 30 minutes, so the router admin account is not locked out.
-_CMCC_THOI_GIAN_TAM_DUNG = 1800
+# After the router REFUSES a login (wrong credentials, account locked) do not retry for 30 minutes, so the admin
+# account is not locked out. Network errors and HTTP errors are not refusals and never start this pause.
+_CMCC_LOGIN_PAUSE_SECONDS = 1800
+
+
+class _CmccLoginRefused(Exception):
+    """The router answered the credential POST but did not open a session."""
 
 
 def cmcc_wifi_clients(devices: dict[str, dict]) -> list[dict]:
     """Active WiFi clients as a list of dicts (mac, ip, name, band, rssi, mode, rx_rate, tx_rate) for the ``clients`` sensor attribute."""
-    ra = []
-    for mac, d in devices.items():
-        if not d.get("active") or d.get("network_type") != "WLAN":
+    clients = []
+    for mac, device in devices.items():
+        if not device.get("active") or device.get("network_type") != "WLAN":
             continue
-        rssi = d.get("rssi")
-        ra.append({
+        rssi = device.get("rssi")
+        clients.append({
             "mac": mac.lower(),
-            "ip": d.get("ip", ""),
-            "name": d.get("name", ""),
-            "band": d.get("port", ""),
+            "ip": device.get("ip", ""),
+            "name": device.get("name", ""),
+            "band": device.get("port", ""),
             "rssi": rssi if isinstance(rssi, int) else None,
-            "mode": d.get("wireless_mode", ""),
-            "rx_rate": d.get("rx_rate"),
-            "tx_rate": d.get("tx_rate"),
+            "mode": device.get("wireless_mode", ""),
+            "rx_rate": device.get("rx_rate"),
+            "tx_rate": device.get("tx_rate"),
         })
-    return ra
+    return clients
 
 
-def _cmcc_int(v: Any) -> int | None:
+def _cmcc_int(value: Any) -> int | None:
     try:
-        return int(str(v).strip())
+        return int(str(value).strip())
     except (TypeError, ValueError):
         return None
 
 
-def _cmcc_muc(khoi: Any) -> list[dict]:
+def _cmcc_entries(block: Any) -> list[dict]:
     """The "1", "2", ... entries of an E2633 JSON block in numeric order; other keys such as MGET_INST_NUM are skipped."""
-    if not isinstance(khoi, dict):
+    if not isinstance(block, dict):
         return []
-    ds = [(int(k), v) for k, v in khoi.items() if str(k).isdigit() and isinstance(v, dict)]
-    return [v for _, v in sorted(ds, key=lambda kv: kv[0])]
+    numbered = [(int(k), v) for k, v in block.items() if str(k).isdigit() and isinstance(v, dict)]
+    return [v for _, v in sorted(numbered, key=lambda item: item[0])]
+
 
 _MODELS = {
     "F6640": {
@@ -210,7 +216,7 @@ class zteClient:
         self.guid = int(time.time() * 1000)
         self.model = model
         self.paths = _MODELS[model]
-        self._cmcc_tam_dung_den = 0.0
+        self._cmcc_paused_until = 0.0
         # Resolve scheme: "auto" uses model default, else user override
         if scheme == "auto":
             self.scheme = self.paths.get("default_scheme", "https")
@@ -423,32 +429,37 @@ class zteClient:
             return False
 
     def _login_cmcc(self) -> bool:
-        """Form-style login of the ZTE E2633 (CMCC firmware). On failure set statusmsg and back off for 30 minutes."""
-        if time.monotonic() < self._cmcc_tam_dung_den:
-            self.statusmsg = "Login paused after the previous failure to avoid locking the admin account."
+        """Form-style login of the ZTE E2633 (CMCC firmware).
+
+        On any failure statusmsg is set and the half-built session is dropped. Only a login the router REFUSED
+        (credential POST answered, no session opened) pauses further attempts for 30 minutes; network errors,
+        timeouts and HTTP errors do not, so the next poll retries as soon as the router is reachable again.
+        """
+        if time.monotonic() < self._cmcc_paused_until:
+            self.statusmsg = "Login paused after the router refused the previous login, to avoid locking the admin account."
             return False
         try:
             self._setup_session()
-            m = _CMCC_TOKEN_RE.search(self.session.get(f"{self.base_url}/", verify=self.verify_ssl, timeout=10).text)
+            r = self.session.get(f"{self.base_url}/", verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            m = _CMCC_TOKEN_RE.search(r.text)
             if not m:
                 raise ValueError("login page has no _sessionTOKEN")
-            token = re.sub(
-                r"<[^>]+>",
-                "",
-                self.session.get(f"{self.base_url}{_CMCC_TOKEN_DANG_NHAP}", verify=self.verify_ssl, timeout=10).text,
-            ).strip()
+            r = self.session.get(f"{self.base_url}{_CMCC_LOGIN_TOKEN_PATH}", verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            token = re.sub(r"<[^>]+>", "", r.text).strip()
             if not token:
                 raise ValueError("could not get the login token")
-            bam = hashlib.sha256((self.password + token).encode()).hexdigest()
+            password_hash = hashlib.sha256((self.password + token).encode()).hexdigest()
             body = urlencode([
                 ("Username", self.username),
-                ("Password", bam),
+                ("Password", password_hash),
                 ("action", "login"),
                 ("Frm_Logintoken", ""),
                 ("captchaCode", ""),
                 ("_sessionTOKEN", m.group(1)),
             ]).encode()
-            self.session.post(
+            r = self.session.post(
                 f"{self.base_url}/",
                 data=body,
                 headers={
@@ -458,13 +469,16 @@ class zteClient:
                 verify=self.verify_ssl,
                 timeout=10,
             )
-            # A failed login makes the data page return something other than the expected JSON: verify with the data request itself.
+            r.raise_for_status()
+            # A refused login makes the data page return something other than the expected JSON: verify with the data
+            # request itself. An HTTP or network error on that request raises and is NOT treated as a refusal.
             if self._cmcc_getpage("GetALLClients", "clientsData") is None:
-                raise ValueError("login failed: check the username and password, or whether the router is logged in elsewhere")
+                raise _CmccLoginRefused("login failed: check the username and password, or whether the router is logged in elsewhere")
         except Exception as e:
             self.statusmsg = f"E2633 login failed: {e}"
             _LOGGER.error(self.statusmsg)
-            self._cmcc_tam_dung_den = time.monotonic() + _CMCC_THOI_GIAN_TAM_DUNG
+            if isinstance(e, _CmccLoginRefused):
+                self._cmcc_paused_until = time.monotonic() + _CMCC_LOGIN_PAUSE_SECONDS
             self.login_data = None
             if self.session:
                 self.session.close()
@@ -474,28 +488,29 @@ class zteClient:
         self.statusmsg = "Login successful."
         return True
 
-    def _cmcc_getpage(self, hanh_dong: str, khoa: str) -> dict[str, Any] | None:
-        """Read one JSON block from the E2633. Anything else (login page, expired session) returns None."""
-        r = self.session.get(f"{self.base_url}{_CMCC_DU_LIEU.format(hanh_dong)}", verify=self.verify_ssl, timeout=10)
+    def _cmcc_getpage(self, action: str, key: str) -> dict[str, Any] | None:
+        """Read one JSON block from the E2633. A non-JSON answer (login page, expired session) returns None; an HTTP error raises."""
+        r = self.session.get(f"{self.base_url}{_CMCC_DATA_PATH.format(action)}", verify=self.verify_ssl, timeout=10)
         self.log_request(r)
+        r.raise_for_status()
         try:
-            du = r.json()
+            data = r.json()
         except ValueError:
             return None
-        return du if isinstance(du, dict) and khoa in du else None
+        return data if isinstance(data, dict) and key in data else None
 
     def _cmcc_devices(self) -> list[dict[str, Any]] | None:
         """WiFi clients of the E2633 (GetALLClients), converted to the shape parse_devices expects."""
         try:
-            du = self._cmcc_getpage("GetALLClients", "clientsData")
-            if du is None:
+            data = self._cmcc_getpage("GetALLClients", "clientsData")
+            if data is None:
                 # Session expired: the next read logs in again.
                 self.login_data = None
                 self.statusmsg = "Could not read the WiFi client list: the session may have expired."
                 return None
             devices = []
-            for m in _cmcc_muc(du["clientsData"]):
-                mac = str(m.get("MacAddr", "")).strip().upper()
+            for entry in _cmcc_entries(data["clientsData"]):
+                mac = str(entry.get("MacAddr", "")).strip().upper()
                 if not _CMCC_MAC_RE.fullmatch(mac):
                     continue
                 devices.append({
@@ -503,13 +518,13 @@ class zteClient:
                     "IconType": None,
                     "NetworkType": "WLAN",
                     "MACAddress": mac,
-                    "IPAddress": str(m.get("IpAddr", "")),
-                    "HostName": str(m.get("HostName", "")),
-                    "Port": _CMCC_BAND.get(str(m.get("AccessType", "")).strip(), ""),
-                    "Rssi": _cmcc_int(m.get("Rssi")),
-                    "WirelessMode": str(m.get("WirelessMode", ""))[:16],
-                    "RxRate": _cmcc_int(m.get("RxRateBps")),
-                    "TxRate": _cmcc_int(m.get("TxRateBps")),
+                    "IPAddress": str(entry.get("IpAddr", "")),
+                    "HostName": str(entry.get("HostName", "")),
+                    "Port": _CMCC_BAND.get(str(entry.get("AccessType", "")).strip(), ""),
+                    "Rssi": _cmcc_int(entry.get("Rssi")),
+                    "WirelessMode": str(entry.get("WirelessMode", ""))[:16],
+                    "RxRate": _cmcc_int(entry.get("RxRateBps")),
+                    "TxRate": _cmcc_int(entry.get("TxRateBps")),
                     "LinkTime": "",
                     "ConnectTime": "",
                 })
@@ -550,8 +565,13 @@ class zteClient:
     def logout(self) -> None:
         """Logout from router."""
         if self.paths.get("login_style") == "cmcc_form":
-            # E2633: keep the session between reads so it does not log in every time (the coordinator calls logout
-            # after each read). An expired session is detected on read and triggers a new login.
+            # E2633: no logout request is known (only the login and the client list were measured from a browser
+            # session), so none is sent: the router ends the session on its own timeout. What we can and do end is
+            # our side: close the HTTP session and forget the login, so the next login() starts from scratch.
+            self.login_data = None
+            if self.session:
+                self.session.close()
+                self.session = None
             return
         try:
             # Check if we are logged in.
@@ -581,6 +601,11 @@ class zteClient:
         try:
             lan_devices = self.get_lan_devices()
             wifi_devices = self.get_wifi_devices()
+
+            if self.paths.get("login_style") == "cmcc_form":
+                # E2633: the WiFi list is the only source (LAN is always []). A failed read is an error, not
+                # "no devices": returning [] would mark every tracked device as away.
+                return wifi_devices
 
             if lan_devices is None and wifi_devices is None:
                 return None

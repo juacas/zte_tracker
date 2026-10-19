@@ -60,3 +60,19 @@ def mock_zte_client():
     client.get_connected_devices = AsyncMock(return_value=[])
     client.logout = AsyncMock()
     return client
+
+
+@pytest.fixture
+def fake_e2633(socket_enabled):
+    """A fake ZTE E2633 router on 127.0.0.1 (see tests/_fake_e2633.py).
+
+    pytest-socket blocks every socket in this repo's test run; ``socket_enabled``
+    opens them for this test only (the HA test plugin still restricts connections
+    to 127.0.0.1). Function scoped, so each test gets a fresh router.
+    """
+    from _fake_e2633 import FakeE2633
+
+    router = FakeE2633()
+    router.start()
+    yield router
+    router.stop()

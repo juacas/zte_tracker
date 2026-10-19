@@ -1,190 +1,170 @@
-"""Tests for the ZTE E2633 (China Mobile firmware) login and WiFi client reading, against a LOCAL FAKE server.
+"""Tests for the ZTE E2633 (China Mobile firmware) login and WiFi client reading.
 
-The fake server only reproduces the flow measured from a browser session (the ``Check`` header and the field
-order). It proves the code follows that flow; it does NOT prove a real E2633 accepts it.
-Run on its own (Home Assistant is not needed): python3 -m unittest tests/test_e2633_client.py
+They run against a LOCAL FAKE router (tests/_fake_e2633.py) that only reproduces the
+flow measured from a browser session. They prove the code follows that flow; they do
+NOT prove a real E2633 accepts it.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
-import pathlib
-import sys
-import threading
-import types
-import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlparse
+from unittest.mock import patch
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
+import pytest
+import _fake_e2633 as fake
 
-# The zte_tracker package __init__ pulls in Home Assistant. Load only the constants zteclient needs.
-pkg = types.ModuleType("zte_tracker")
-pkg.__path__ = [str(ROOT / "custom_components" / "zte_tracker")]
-const = types.ModuleType("zte_tracker.const")
-const.DEFAULT_QUERY_ROUTER_DETAILS = True
-const.DEFAULT_QUERY_WAN_STATUS = True
-sys.modules["zte_tracker"] = pkg
-sys.modules["zte_tracker.const"] = const
-
-from zte_tracker.zteclient.zte_client import zteClient  # noqa: E402
-
-PASSWORD = "fake-test-password"
-TOKEN = "fake-login-token"
-LOGIN_PAGE = '<html><script>addParameter("_sessionTOKEN", "98765");</script><input id="Frm_Password"></html>'
-HOME_PAGE = "<html>home</html>"
-CLIENTS_DATA = {
-    "clientsData": {
-        "1": {"MacAddr": "02:00:00:00:00:01", "IpAddr": "192.168.1.10", "HostName": "host-a", "AccessType": "1", "Rssi": "-65", "WirelessMode": "802.11ax", "RxRateBps": "1200", "TxRateBps": "800"},
-        "2": {"MacAddr": "02:00:00:00:00:02", "IpAddr": "192.168.1.11", "HostName": "host-b", "AccessType": "2", "Rssi": "-72", "WirelessMode": "802.11ac"},
-        "3": {"MacAddr": "not-a-mac", "IpAddr": "192.168.1.12"},
-        "MGET_INST_NUM": 3,
-    }
-}
+from custom_components.zte_tracker.zteclient.zte_client import zteClient
 
 
-class FakeZte(BaseHTTPRequestHandler):
-    def log_message(self, *args):  # silent
-        pass
-
-    def _send(self, code: int, body: str, ctype: str = "text/html; charset=utf-8", cookie: str | None = None):
-        data = body.encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        if cookie:
-            self.send_header("Set-Cookie", cookie)
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _has_session(self) -> bool:
-        return "SID=ok" in (self.headers.get("Cookie") or "")
-
-    def do_GET(self):
-        srv = self.server
-        if self.path == "/":
-            return self._send(200, HOME_PAGE if self._has_session() else LOGIN_PAGE)
-        if self.path.startswith("/function_module/login_module/login_page/logintoken_lua.lua"):
-            return self._send(200, f"<response>{TOKEN}</response>", "text/xml")
-        if self.path.startswith("/getpage.lua"):
-            if srv.expire_sessions > 0:  # simulate an expired session
-                srv.expire_sessions -= 1
-                return self._send(200, LOGIN_PAGE)
-            if not self._has_session():
-                return self._send(200, LOGIN_PAGE)
-            action = parse_qs(urlparse(self.path).query).get("Action", [""])[0]
-            if action == "GetALLClients":
-                return self._send(200, json.dumps(CLIENTS_DATA), "application/json")
-            return self._send(404, "")
-        self._send(404, "")
-
-    def do_POST(self):
-        srv = self.server
-        srv.login_count += 1
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length)
-        fields = {k: v[0] for k, v in parse_qs(raw.decode()).items()}
-        order = list(parse_qs(raw.decode(), keep_blank_values=True).keys())
-        ok = (
-            fields.get("Username") == "user"
-            and fields.get("Password") == hashlib.sha256((PASSWORD + TOKEN).encode()).hexdigest()
-            and fields.get("_sessionTOKEN") == "98765"
-            and fields.get("action") == "login"
-            and order == ["Username", "Password", "action", "Frm_Logintoken", "captchaCode", "_sessionTOKEN"]
-            and self.headers.get("Check") == hashlib.sha256(raw).hexdigest()
-        )
-        if ok:
-            return self._send(200, HOME_PAGE, cookie="SID=ok; Path=/")
-        self._send(200, LOGIN_PAGE)
+def _client(router, password: str = fake.PASSWORD) -> zteClient:
+    return zteClient(router.host, fake.USERNAME, password, "E2633", scheme="http")
 
 
-class E2633Test(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.server = HTTPServer(("127.0.0.1", 0), FakeZte)
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
-        cls.thread.start()
+def test_login_and_read_wifi_clients(fake_e2633) -> None:
+    c = _client(fake_e2633)
+    assert c.login()
+    devices = c.get_devices_response()
+    assert fake_e2633.login_count == 1
+    assert [d["MACAddress"] for d in devices] == [
+        "02:00:00:00:00:01",
+        "02:00:00:00:00:02",
+    ]
+    assert all(d["NetworkType"] == "WLAN" for d in devices)
+    assert [d["Port"] for d in devices] == ["2.4G", "5G"]
+    assert devices[0]["HostName"] == "host-a"
+    assert [d["Rssi"] for d in devices] == [-65, -72]
+    assert devices[1]["WirelessMode"] == "802.11ac"
+    assert (devices[0]["RxRate"], devices[0]["TxRate"]) == (1200, 800)
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.server.shutdown()
-        cls.server.server_close()
 
-    def setUp(self):
-        self.server.expire_sessions = 0
-        self.server.login_count = 0
+def test_wrong_password_is_not_retried_and_not_leaked(fake_e2633) -> None:
+    wrong_password = "wrong-password-used-only-in-this-test"
+    c = _client(fake_e2633, wrong_password)
+    assert not c.login()
+    assert fake_e2633.login_count == 1
+    assert wrong_password not in c.statusmsg
+    # The router refused the credentials: back off, so the next call sends no login.
+    assert not c.login()
+    assert fake_e2633.login_count == 1
 
-    def _client(self, password: str = PASSWORD) -> zteClient:
-        return zteClient(
-            f"127.0.0.1:{self.server.server_port}", "user", password, "E2633", scheme="http",
-        )
 
-    def test_login_and_read_wifi_clients(self):
-        c = self._client()
-        self.assertTrue(c.login())
-        devices = c.get_devices_response()
-        self.assertEqual(self.server.login_count, 1)
-        self.assertEqual([d["MACAddress"] for d in devices], ["02:00:00:00:00:01", "02:00:00:00:00:02"])
-        self.assertTrue(all(d["NetworkType"] == "WLAN" for d in devices))
-        self.assertEqual([d["Port"] for d in devices], ["2.4G", "5G"])
-        self.assertEqual(devices[0]["HostName"], "host-a")
-        self.assertEqual([d["Rssi"] for d in devices], [-65, -72])
-        self.assertEqual(devices[1]["WirelessMode"], "802.11ac")
-        self.assertEqual((devices[0]["RxRate"], devices[0]["TxRate"]), (1200, 800))
+def test_expired_session_logs_in_again(fake_e2633) -> None:
+    c = _client(fake_e2633)
+    assert c.login()
+    assert c.get_wifi_devices()
+    fake_e2633.expire_sessions = 1
+    assert c.get_wifi_devices() is None
+    assert c.login_data is None
+    assert c.login()
+    assert fake_e2633.login_count == 2
+    assert c.get_wifi_devices()
 
-    def test_clients_attribute_shape(self):
-        from zte_tracker.zteclient.zte_client import cmcc_wifi_clients
-        c = self._client()
-        c.login()
-        dev = {d["MACAddress"]: {
-            "name": d["HostName"], "ip": d["IPAddress"], "active": True, "network_type": d["NetworkType"],
-            "port": d["Port"], "rssi": d["Rssi"], "wireless_mode": d["WirelessMode"],
-            "rx_rate": d["RxRate"], "tx_rate": d["TxRate"]}
-            for d in c.get_devices_response()}
-        dev["02:00:00:00:00:99"] = {"name": "old", "ip": "", "active": False, "network_type": "WLAN", "port": "2.4G"}
-        dev["02:00:00:00:00:98"] = {"name": "wired", "ip": "", "active": True, "network_type": "LAN", "port": "lan1"}
-        clients = cmcc_wifi_clients(dev)
-        self.assertEqual(sorted(d["mac"] for d in clients), ["02:00:00:00:00:01", "02:00:00:00:00:02"])
-        a = next(d for d in clients if d["mac"] == "02:00:00:00:00:01")
-        self.assertEqual(a, {"mac": "02:00:00:00:00:01", "ip": "192.168.1.10", "name": "host-a",
-                             "band": "2.4G", "rssi": -65, "mode": "802.11ax", "rx_rate": 1200, "tx_rate": 800})
 
-    def test_wrong_password_is_not_retried_and_not_leaked(self):
-        wrong_password = "wrong-password-used-only-in-this-test"
-        c = self._client(wrong_password)
-        self.assertFalse(c.login())
-        self.assertEqual(self.server.login_count, 1)
-        self.assertNotIn(wrong_password, c.statusmsg)
-        # After a failure the client backs off: the next call sends no further login request.
-        self.assertFalse(c.login())
-        self.assertEqual(self.server.login_count, 1)
+def test_reboot_wan_details_and_lan_are_unsupported(fake_e2633) -> None:
+    c = _client(fake_e2633)
+    assert c.login()
+    assert not c.reboot()
+    assert c.get_wan_status() == {}
+    assert c.get_router_details() == {}
+    assert c.get_lan_devices() == []
 
-    def test_expired_session_logs_in_again(self):
-        c = self._client()
-        self.assertTrue(c.login())
-        self.assertTrue(c.get_wifi_devices())
-        self.server.expire_sessions = 1
-        self.assertIsNone(c.get_wifi_devices())
-        self.assertIsNone(c.login_data)
-        self.assertTrue(c.login())
-        self.assertEqual(self.server.login_count, 2)
-        self.assertTrue(c.get_wifi_devices())
 
-    def test_logout_keeps_session_and_reboot_wan_unsupported(self):
-        c = self._client()
-        c.login()
-        session = c.session
+def test_model_is_registered() -> None:
+    assert "E2633" in zteClient.get_models()
+
+
+# --- review point 2: a failed read is an error, not "no devices" -------------------
+
+
+def test_failed_wifi_read_is_an_error_not_an_empty_list(fake_e2633) -> None:
+    """get_devices_response used to return [] when the WiFi read failed, so every
+    tracked device went away while the router was still connected."""
+    c = _client(fake_e2633)
+    assert c.login()
+    fake_e2633.data_status = 503
+    assert c.get_devices_response() is None
+    assert "WiFi" in c.statusmsg
+
+
+def test_expired_session_read_is_an_error_not_an_empty_list(fake_e2633) -> None:
+    c = _client(fake_e2633)
+    assert c.login()
+    fake_e2633.expire_sessions = 1
+    assert c.get_devices_response() is None
+
+
+def test_router_with_no_wifi_clients_is_an_empty_list(fake_e2633) -> None:
+    """A successful read of an empty list is still an empty list."""
+    fake_e2633.clients = {"clientsData": {"MGET_INST_NUM": 0}}
+    c = _client(fake_e2633)
+    assert c.login()
+    assert c.get_devices_response() == []
+
+
+# --- review point 3: logout, backoff, HTTP status ----------------------------------
+
+
+def test_logout_drops_the_session(fake_e2633) -> None:
+    c = _client(fake_e2633)
+    assert c.login()
+    session = c.session
+    with patch.object(session, "close", wraps=session.close) as closed:
         c.logout()
-        self.assertIs(c.session, session, "E2633 logout must not drop the session")
-        self.assertFalse(c.reboot())
-        self.assertEqual(c.get_wan_status(), {})
-        self.assertEqual(c.get_router_details(), {})
-        self.assertEqual(c.get_lan_devices(), [])
-
-    def test_model_is_registered(self):
-        self.assertIn("E2633", zteClient.get_models())
+    closed.assert_called_once()
+    assert c.session is None
+    assert c.login_data is None
+    # The next login starts a new session.
+    assert c.login()
+    assert fake_e2633.login_count == 2
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_network_loss_does_not_start_the_long_backoff(fake_e2633) -> None:
+    c = _client(fake_e2633)
+    fake_e2633.stop()
+    assert not c.login()
+    assert fake_e2633.login_count == 0
+    fake_e2633.start()  # the router is back: the very next login must be tried
+    assert c.login()
+    assert fake_e2633.login_count == 1
+
+
+# 503 is retried by the session adapter and raised as RetryError; 404 reaches raise_for_status.
+@pytest.mark.parametrize("status", [503, 404])
+@pytest.mark.parametrize("page", ["home_status", "token_status"])
+def test_http_error_before_the_login_post_sends_no_credentials(
+    fake_e2633, page, status
+) -> None:
+    """An HTTP error on the login or token page must not lead to the credential POST,
+    and it is not a refusal, so it must not back off either."""
+    c = _client(fake_e2633)
+    setattr(fake_e2633, page, status)
+    assert not c.login()
+    assert fake_e2633.login_count == 0
+    assert str(status) in c.statusmsg
+    setattr(fake_e2633, page, 200)
+    assert c.login()
+    assert fake_e2633.login_count == 1
+
+
+@pytest.mark.parametrize("status", [503, 404])
+def test_http_error_on_the_check_read_after_login_is_not_a_refusal(
+    fake_e2633, status
+) -> None:
+    c = _client(fake_e2633)
+    fake_e2633.data_status = status
+    assert not c.login()
+    assert fake_e2633.login_count == 1
+    fake_e2633.data_status = 200
+    assert c.login()  # no backoff: tried again at once
+    assert fake_e2633.login_count == 2
+
+
+def test_refused_login_backs_off_then_recovers_after_the_pause(fake_e2633) -> None:
+    c = _client(fake_e2633, "wrong-password-used-only-in-this-test")
+    assert not c.login()
+    assert not c.login()
+    assert fake_e2633.login_count == 1
+    assert "paused" in c.statusmsg.lower()
+    # Once the pause has run out the client tries again.
+    c._cmcc_paused_until = 0.0
+    assert not c.login()
+    assert fake_e2633.login_count == 2

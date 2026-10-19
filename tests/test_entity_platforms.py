@@ -36,6 +36,7 @@ def _coordinator(devices: dict | None = None, router_info: dict | None = None):
         model="F6640",
         base_url="https://192.168.1.1",
         mesh_topology=False,
+        paths={},
     )
     coordinator.data = {
         "devices": devices or {},
