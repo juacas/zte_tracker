@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
@@ -14,6 +15,30 @@ from homeassistant.util import dt as ha_dt
 
 from .const import DOMAIN, ICON
 from .coordinator import ZteDataCoordinator
+from .zteclient.zte_client import cmcc_wifi_clients
+
+
+# The recorder drops the whole attribute set of a state above 16384 bytes
+# (homeassistant.components.recorder.db_schema.MAX_STATE_ATTRS_BYTES). Stay below it with
+# room for the attributes Home Assistant adds itself (friendly_name, icon, unit).
+_MAX_ATTRIBUTES_BYTES = 15000
+
+
+def _json_size(value: Any) -> int:
+    return len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode())
+
+
+def _add_clients(attributes: dict[str, Any], clients: list[dict]) -> None:
+    """Add as many ``clients`` as fit under _MAX_ATTRIBUTES_BYTES; flag the cut with ``clients_truncated``."""
+    used = _json_size({**attributes, "clients": [], "clients_truncated": True})
+    fitted: list[dict] = []
+    for client in clients:
+        used += _json_size(client) + 1  # +1: the comma between list items
+        if used > _MAX_ATTRIBUTES_BYTES:
+            attributes["clients_truncated"] = True
+            break
+        fitted.append(client)
+    attributes["clients"] = fitted
 
 
 async def async_setup_entry(
@@ -112,7 +137,11 @@ class ZteDeviceCountSensor(ZteBaseSensor):
             f"{mac}({device.get('name', 'Unknown')}-{device.get('ip', '')})"
             for mac, device in devices.items()
         ]
-        return {
+        attributes: dict[str, Any] = {
             "devices": device_list,
             "num_devices": len([d for d in devices.values() if d.get("active")]),
         }
+        if self.coordinator.client.paths.get("login_style") == "cmcc_form":
+            # E2633 only: active WiFi clients with band, signal and rates, cut to fit the recorder limit.
+            _add_clients(attributes, cmcc_wifi_clients(devices))
+        return attributes

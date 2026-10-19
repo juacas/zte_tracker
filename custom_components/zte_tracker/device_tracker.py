@@ -338,7 +338,7 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
         devices = data.get("devices", {})
         device = devices.get(self._mac, {})
 
-        return {
+        attributes = {
             "mac_address": self._mac,
             "ip_address": device.get("ip"),
             "hostname": device.get("name"),
@@ -350,6 +350,11 @@ class ZteDeviceTrackerEntity(CoordinatorEntity, ScannerEntity):
             "connect_time": device.get("ConnectTime"),
             "mesh_node": device.get("mesh_node"),
         }
+        # Only routers that report per-client WiFi details (E2633) have these.
+        for key in ("rssi", "wireless_mode", "rx_rate", "tx_rate"):
+            if key in device:
+                attributes[key] = device[key]
+        return attributes
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""
