@@ -487,8 +487,8 @@ class zteClient:
         """Form-style login of the ZTE E2633 (CMCC firmware).
 
         On any failure statusmsg is set and the half-built session is dropped. Only a login the router REFUSED
-        (credential POST answered, no session opened) pauses further attempts for 30 minutes; network errors,
-        timeouts and HTTP errors do not, so the next poll retries as soon as the router is reachable again.
+        (credential POST answered, no session opened, or answered 401/403) pauses further attempts for 30 minutes;
+        network errors, timeouts and other HTTP errors do not, so the next poll retries as soon as the router is reachable again.
         """
         if time.monotonic() < self._cmcc_paused_until:
             self.statusmsg = "Login paused after the router refused the previous login, to avoid locking the admin account."
@@ -498,6 +498,7 @@ class zteClient:
             "E2633 login: starting%s",
             " (after an expired session)" if self._cmcc_session_expired else "",
         )
+        credentials_sent = False
         try:
             if self.session:
                 self.session.close()
@@ -521,6 +522,7 @@ class zteClient:
                 ("captchaCode", ""),
                 ("_sessionTOKEN", m.group(1)),
             ]).encode()
+            credentials_sent = True
             r = self.session.post(
                 f"{self.base_url}/",
                 data=body,
@@ -539,7 +541,14 @@ class zteClient:
         except Exception as e:
             self.statusmsg = f"E2633 login failed: {e}"
             _LOGGER.error(self.statusmsg)
-            if isinstance(e, _CmccLoginRefused):
+            # 401/403 after the credentials went out is a rejection too, not a transient error.
+            rejected = (
+                credentials_sent
+                and isinstance(e, requests.HTTPError)
+                and e.response is not None
+                and e.response.status_code in (401, 403)
+            )
+            if isinstance(e, _CmccLoginRefused) or rejected:
                 self._cmcc_paused_until = time.monotonic() + _CMCC_LOGIN_PAUSE_SECONDS
                 _LOGGER.debug("E2633 login: refused by the router, pausing %d s", _CMCC_LOGIN_PAUSE_SECONDS)
             else:

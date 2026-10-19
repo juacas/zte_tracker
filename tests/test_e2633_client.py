@@ -176,6 +176,20 @@ def test_http_error_on_the_check_read_after_login_is_not_a_refusal(
     assert fake_e2633.login_count == 2
 
 
+@pytest.mark.parametrize("status", [401, 403])
+def test_http_rejection_after_the_credentials_were_sent_backs_off(
+    fake_e2633, status
+) -> None:
+    c = _client(fake_e2633)
+    fake_e2633.data_status = status
+    assert not c.login()
+    assert fake_e2633.login_count == 1
+    fake_e2633.data_status = 200
+    assert not c.login()  # paused: no second credential POST
+    assert fake_e2633.login_count == 1
+    assert "paused" in c.statusmsg.lower()
+
+
 def test_refused_login_backs_off_then_recovers_after_the_pause(fake_e2633) -> None:
     c = _client(fake_e2633, "wrong-password-used-only-in-this-test")
     assert not c.login()
