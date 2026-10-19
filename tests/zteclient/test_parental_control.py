@@ -152,7 +152,7 @@ class TestParentalControl(TestCase):
         self.assertEqual(client.get_parental_controls(), [])
 
     def test_check_header_key_size_follows_model(self):
-        for model, size in (("F680", 256), ("F6600P", 512)):
+        for model, size in (("F680", 256), ("F6600P", 512), ("F6745Q", 256)):
             client = _make_client()
             client.model = model
             check = client._check_header("a=b")
@@ -212,3 +212,76 @@ class TestParentalControl(TestCase):
             self.assertEqual(client.get_parental_controls(), [])
 
         self.assertIn("0 rule(s) parsed from 0 instance(s)", "\n".join(logs.output))
+
+    def _get_with_body(self, body):
+        client = _make_client()
+        response = MagicMock(text=body, request=None)
+        response.raise_for_status = Mock()
+        client.session.get.return_value = response
+        return client
+
+    def test_get_parental_controls_rejects_router_error_with_instances(self):
+        error_str = SAMPLE.replace(
+            "<IF_ERRORSTR>SUCC</IF_ERRORSTR>", "<IF_ERRORSTR>FAIL</IF_ERRORSTR>"
+        )
+        error_id = SAMPLE.replace(
+            "<IF_ERRORID>0</IF_ERRORID>", "<IF_ERRORID>-1</IF_ERRORID>"
+        )
+        for body in (error_str, error_id):
+            self.assertIsNone(self._get_with_body(body).get_parental_controls())
+
+    def test_get_parental_controls_instances_without_fields_is_a_failure(self):
+        body = (
+            "<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR>"
+            "<IF_ERRORID>0</IF_ERRORID><Instance><ParaName>Name</ParaName>"
+            "<ParaValue>x</ParaValue></Instance></ajax_response_xml_root>"
+        )
+        self.assertIsNone(self._get_with_body(body).get_parental_controls())
+
+    def test_get_parental_controls_parses_textual_enable_values(self):
+        body = SAMPLE.replace(
+            "<ParaName>Enable</ParaName><ParaValue>1</ParaValue>",
+            "<ParaName>Enable</ParaName><ParaValue>true</ParaValue>",
+        )
+        rules = self._get_with_body(body).get_parental_controls()
+
+        self.assertEqual([rule["enabled"] for rule in rules], [False, True])
+
+    def test_get_parental_controls_warns_once_per_outage(self):
+        client = _make_client()
+        client.session.get.side_effect = RuntimeError("boom")
+
+        with self.assertLogs(level="DEBUG") as logs:
+            client.get_parental_controls()
+            client.get_parental_controls()
+
+        levels = [record.levelname for record in logs.records]
+        self.assertEqual(levels.count("WARNING"), 1)
+        self.assertEqual(levels.count("DEBUG"), 1)
+
+        response = MagicMock(text=SAMPLE, request=None)
+        response.raise_for_status = Mock()
+        client.session.get.side_effect = None
+        client.session.get.return_value = response
+        self.assertTrue(client.get_parental_controls())
+
+        client.session.get.side_effect = RuntimeError("boom")
+        with self.assertLogs(level="WARNING"):
+            client.get_parental_controls()
+
+    def test_set_parental_control_enabled_rejects_router_errors(self):
+        for body in (
+            SUCCESS.replace("<IF_ERRORSTR>SUCC<", "<IF_ERRORSTR>FAIL<"),
+            SUCCESS.replace("<IF_ERRORID>0<", "<IF_ERRORID>-1<"),
+        ):
+            client = _make_client()
+            view = MagicMock(text='var _sessionTmpToken = "t";', request=None)
+            view.raise_for_status = Mock()
+            response = MagicMock(text=body, request=None)
+            response.raise_for_status = Mock()
+            client.session.get.return_value = view
+            client.session.post.return_value = response
+
+            self.assertFalse(
+                client.set_parental_control_enabled("DEV.PCUser1", enabled=True)
+            )

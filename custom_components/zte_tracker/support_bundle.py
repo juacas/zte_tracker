@@ -403,7 +403,7 @@ def _probe_matrix(profiles: dict[str, dict[str, Any]]) -> dict[str, tuple[str, s
             # view must run before data or the router answers SessionTimeout; see get_wan_status().
             ("wan_view", "tag_wan_status_view", "type_first_request"),
             ("wan", "tag_wan_status_data", "type_main_request"),
-            # Only F680 currently advertises this endpoint; other models skip it.
+            # Only the F680 profile defines this tag; like every row here it is probed for every configured model.
             ("parentctrl", "tag_parentctrl_data", "type_main_request"),
             # only GPON models define these tags (F6600P); paths.get() is None elsewhere, so the loop skips them.
             ("pon_optical_view", "tag_pon_optical_view", "type_first_request"),

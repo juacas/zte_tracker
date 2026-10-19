@@ -928,6 +928,9 @@ class zteClient:
                     }
                 )
 
+            if instances and not rules:
+                raise Exception("Parental-control instances lack _InstID or Enable")
+
             # Names and counts only: rule names and MACs stay out of the log.
             _LOGGER.debug(
                 "Parental controls: %d rule(s) parsed from %d instance(s), "
@@ -936,9 +939,17 @@ class zteClient:
                 len(xml.findall(".//Instance")),
                 [child.tag for child in xml][:10],
             )
+            self._parental_fetch_failed = False
             return sorted(rules, key=lambda rule: str(rule["id"]))
         except Exception as ex:
-            _LOGGER.warning("Failed to fetch parental controls: %s", ex)
+            # Warn once per outage so a firmware without this page does not flood the log every poll.
+            log = (
+                _LOGGER.debug
+                if getattr(self, "_parental_fetch_failed", False)
+                else _LOGGER.warning
+            )
+            self._parental_fetch_failed = True
+            log("Failed to fetch parental controls: %s", ex)
             return None
 
     def set_parental_control_enabled(self, inst_id: str, enabled: bool) -> bool:
