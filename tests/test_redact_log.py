@@ -76,3 +76,38 @@ def test_main_reads_a_file_and_writes_an_output_file(tmp_path, capsys) -> None:
     assert redact_log.main([str(source), "-o", str(target)]) == 0
     assert "plain-secret" not in target.read_text(encoding="utf-8")
     assert "Read the result" in capsys.readouterr().err
+
+
+EXTRA_LOG = "\n".join(
+    [
+        "cisco style 0200.0000.0001 and bare 020000000002 and upper 0200000000AB seen",
+        "ipv6 2001:db8::1 and fe80::1%eth0 and full 2001:0db8:0000:0000:0000:0000:0000:0002 here",
+        "Login failed: admin@router.home.lan and mail me@example.org",
+        "Request 200 URL: https://router.home.lan:8443/getpage.lua?x=1 and http://user:pw1234@nas.local/ end",
+        "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "2026-10-19 10:00:00.123 DEBUG at 10:00:01 build 1.2.3.4",
+    ]
+)
+
+
+def test_more_address_forms_are_masked() -> None:
+    result = _run(EXTRA_LOG)
+    for leaked in (
+        "0200.0000.0001", "020000000002", "0200000000AB", "2001:db8::1", "fe80::1", "2001:0db8",
+        "router.home.lan", "admin@", "me@example.org", "nas.local", "pw1234", "user:",
+    ):
+        assert leaked not in result, leaked
+
+
+def test_browser_versions_and_timestamps_are_not_mangled() -> None:
+    result = _run(EXTRA_LOG)
+    assert "Chrome/120.0.0.0" in result
+    assert "Safari/537.36" in result
+    assert "2026-10-19 10:00:00.123 DEBUG at 10:00:01" in result
+    assert "https://<host>:8443/getpage.lua?x=1" in result
+    assert "<IP-1>" in result  # build 1.2.3.4 is still an IPv4-shaped value
+
+
+def test_the_same_mac_in_different_notations_gets_one_placeholder() -> None:
+    result = _run("a 02:00:00:00:00:01 b 0200.0000.0001 c 020000000001 d 02-00-00-00-00-01")
+    assert result.count("<MAC-1>") == 4 and "<MAC-2>" not in result
