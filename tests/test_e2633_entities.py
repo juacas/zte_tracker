@@ -119,3 +119,44 @@ async def test_no_reboot_button_for_e2633_but_one_for_other_models(mock_hass) ->
         added: list = []
         await button.async_setup_entry(mock_hass, _entry(), added.extend)
         assert len(added) == expected, model
+
+
+# --- per-device WiFi fields exist only where the router reports them -----------------
+
+WIFI_FIELDS = ("rssi", "wireless_mode", "rx_rate", "tx_rate")
+
+
+def _merged(raw_device: dict) -> dict:
+    from custom_components.zte_tracker.coordinator import ZteDataCoordinator
+
+    coordinator = object.__new__(ZteDataCoordinator)
+    coordinator._device_cache = {}
+    return ZteDataCoordinator._merge_device_data(coordinator, [raw_device])[raw_device["MACAddress"]]
+
+
+def test_other_models_get_no_wifi_fields_on_devices_or_trackers() -> None:
+    from custom_components.zte_tracker import device_tracker
+
+    raw = {"MACAddress": "AA:BB:CC:DD:EE:01", "HostName": "phone", "Active": True, "NetworkType": "WLAN"}
+    merged = _merged(raw)
+    assert not set(WIFI_FIELDS) & set(merged)
+
+    coordinator = _coordinator("F6640", {raw["MACAddress"]: merged})
+    entity = device_tracker.ZteDeviceTrackerEntity(coordinator, _entry(), raw["MACAddress"], {"name": "phone"})
+    assert not set(WIFI_FIELDS) & set(entity.extra_state_attributes)
+
+
+def test_e2633_devices_and_trackers_carry_the_wifi_fields() -> None:
+    from custom_components.zte_tracker import device_tracker
+
+    raw = {
+        "MACAddress": "02:00:00:00:00:01", "HostName": "host-a", "Active": True, "NetworkType": "WLAN",
+        "Rssi": -65, "WirelessMode": "802.11ax", "RxRate": 1200, "TxRate": 800,
+    }
+    merged = _merged(raw)
+    assert [merged[k] for k in WIFI_FIELDS] == [-65, "802.11ax", 1200, 800]
+
+    coordinator = _coordinator("E2633", {raw["MACAddress"]: merged})
+    entity = device_tracker.ZteDeviceTrackerEntity(coordinator, _entry(), raw["MACAddress"], {"name": "host-a"})
+    attributes = entity.extra_state_attributes
+    assert [attributes[k] for k in WIFI_FIELDS] == [-65, "802.11ax", 1200, 800]

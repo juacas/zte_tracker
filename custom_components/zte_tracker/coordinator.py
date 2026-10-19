@@ -351,14 +351,19 @@ class ZteDataCoordinator(DataUpdateCoordinator):
                 "network_type": device.get("NetworkType", "Unknown"),
                 "last_seen": datetime.now().isoformat(),
                 "port": device.get("Port", ""),  # LAN port or WLAN ESSID
-                "rssi": device.get("Rssi"),
-                "wireless_mode": device.get("WirelessMode", ""),
-                "rx_rate": device.get("RxRate"),
-                "tx_rate": device.get("TxRate"),
                 "LinkTime": device.get("LinkTime", ""),
                 "ConnectTime": device.get("ConnectTime", ""),
                 "mesh_node": device.get("MeshNode", ""),
             }
+            # Only routers that report per-client WiFi details (E2633) have these keys.
+            for key, field in (
+                ("rssi", "Rssi"),
+                ("wireless_mode", "WirelessMode"),
+                ("rx_rate", "RxRate"),
+                ("tx_rate", "TxRate"),
+            ):
+                if field in device:
+                    device_data[key] = device[field]
 
             # Merge with cached data if available
             if mac in self._device_cache:

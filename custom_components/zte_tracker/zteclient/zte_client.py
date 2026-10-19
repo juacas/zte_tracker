@@ -67,6 +67,13 @@ def cmcc_wifi_clients(devices: dict[str, dict]) -> list[dict]:
     return clients
 
 
+def _cmcc_error_kind(error: Exception) -> str:
+    """Exception class and, for an HTTP error, its status code: safe to log (no URL, host or body)."""
+    response = getattr(error, "response", None)
+    status = getattr(response, "status_code", None)
+    return f"{type(error).__name__} {status}" if status else type(error).__name__
+
+
 def _cmcc_int(value: Any) -> int | None:
     try:
         return int(str(value).strip())
@@ -217,6 +224,7 @@ class zteClient:
         self.model = model
         self.paths = _MODELS[model]
         self._cmcc_paused_until = 0.0
+        self._cmcc_session_expired = False
         # Resolve scheme: "auto" uses model default, else user override
         if scheme == "auto":
             self.scheme = self.paths.get("default_scheme", "https")
@@ -437,8 +445,15 @@ class zteClient:
         """
         if time.monotonic() < self._cmcc_paused_until:
             self.statusmsg = "Login paused after the router refused the previous login, to avoid locking the admin account."
+            _LOGGER.debug("E2633 login: skipped, paused after a refused login")
             return False
+        _LOGGER.debug(
+            "E2633 login: starting%s",
+            " (after an expired session)" if self._cmcc_session_expired else "",
+        )
         try:
+            if self.session:
+                self.session.close()
             self._setup_session()
             r = self.session.get(f"{self.base_url}/", verify=self.verify_ssl, timeout=10)
             r.raise_for_status()
@@ -479,13 +494,18 @@ class zteClient:
             _LOGGER.error(self.statusmsg)
             if isinstance(e, _CmccLoginRefused):
                 self._cmcc_paused_until = time.monotonic() + _CMCC_LOGIN_PAUSE_SECONDS
+                _LOGGER.debug("E2633 login: refused by the router, pausing %d s", _CMCC_LOGIN_PAUSE_SECONDS)
+            else:
+                _LOGGER.debug("E2633 login failed (%s), no pause", _cmcc_error_kind(e))
             self.login_data = None
             if self.session:
                 self.session.close()
                 self.session = None
             return False
         self.login_data = {"login_need_refresh": 0}
+        self._cmcc_session_expired = False
         self.statusmsg = "Login successful."
+        _LOGGER.debug("E2633 login: session opened")
         return True
 
     def _cmcc_getpage(self, action: str, key: str) -> dict[str, Any] | None:
@@ -506,6 +526,8 @@ class zteClient:
             if data is None:
                 # Session expired: the next read logs in again.
                 self.login_data = None
+                self._cmcc_session_expired = True
+                _LOGGER.debug("E2633 session expired: the data page did not return JSON")
                 self.statusmsg = "Could not read the WiFi client list: the session may have expired."
                 return None
             devices = []
@@ -529,10 +551,12 @@ class zteClient:
                     "ConnectTime": "",
                 })
             self.statusmsg = "OK"
+            _LOGGER.debug("E2633 read %d WiFi clients", len(devices))
             return devices
         except Exception as e:
             self.statusmsg = f"Failed to get WiFi devices: {e}"
             _LOGGER.error(self.statusmsg)
+            _LOGGER.debug("E2633 read failed (%s)", _cmcc_error_kind(e))
             return None
 
     def get_guid(self) -> int:
@@ -562,16 +586,19 @@ class zteClient:
 
         return device_info["sess_token"]
 
-    def logout(self) -> None:
-        """Logout from router."""
+    def logout(self, final: bool = False) -> None:
+        """Logout from router. ``final`` marks the last logout of the client (integration unload)."""
         if self.paths.get("login_style") == "cmcc_form":
             # E2633: no logout request is known (only the login and the client list were measured from a browser
-            # session), so none is sent: the router ends the session on its own timeout. What we can and do end is
-            # our side: close the HTTP session and forget the login, so the next login() starts from scratch.
-            self.login_data = None
-            if self.session:
-                self.session.close()
-                self.session = None
+            # session), so none is sent: the router ends the session on its own timeout. The coordinator calls
+            # logout() after every poll in the default mode; dropping the session there would log in again on every
+            # poll and leave one orphan session per poll on the router. So the session is kept (an expired one is
+            # detected on read) and only the final logout closes the client side and forgets the login.
+            if final:
+                self.login_data = None
+                if self.session:
+                    self.session.close()
+                    self.session = None
             return
         try:
             # Check if we are logged in.

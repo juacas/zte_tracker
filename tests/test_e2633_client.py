@@ -103,18 +103,36 @@ def test_router_with_no_wifi_clients_is_an_empty_list(fake_e2633) -> None:
 # --- review point 3: logout, backoff, HTTP status ----------------------------------
 
 
-def test_logout_drops_the_session(fake_e2633) -> None:
+def test_logout_keeps_the_session_but_final_logout_drops_it(fake_e2633) -> None:
+    """The coordinator calls logout() after every poll in the default mode. With no known E2633 logout
+    request, dropping the session there would make every poll log in again and leave one orphan session
+    per poll on the router. Only the final logout (integration unload) forgets the session."""
     c = _client(fake_e2633)
     assert c.login()
     session = c.session
+    c.logout()
+    assert c.session is session and c.login_data is not None
+    assert c.login()  # still logged in: no new login
+    assert fake_e2633.login_count == 1
     with patch.object(session, "close", wraps=session.close) as closed:
-        c.logout()
+        c.logout(final=True)
     closed.assert_called_once()
     assert c.session is None
     assert c.login_data is None
-    # The next login starts a new session.
-    assert c.login()
+    assert c.login()  # a new session starts from scratch
     assert fake_e2633.login_count == 2
+
+
+def test_a_new_login_closes_the_previous_session(fake_e2633) -> None:
+    c = _client(fake_e2633)
+    assert c.login()
+    old = c.session
+    fake_e2633.expire_sessions = 1
+    assert c.get_wifi_devices() is None  # expired: login_data cleared, old session object still set
+    with patch.object(old, "close", wraps=old.close) as closed:
+        assert c.login()
+    closed.assert_called_once()
+    assert c.session is not old
 
 
 def test_network_loss_does_not_start_the_long_backoff(fake_e2633) -> None:
@@ -168,3 +186,46 @@ def test_refused_login_backs_off_then_recovers_after_the_pause(fake_e2633) -> No
     c._cmcc_paused_until = 0.0
     assert not c.login()
     assert fake_e2633.login_count == 2
+
+
+# --- debug log: milestones, no secrets ---------------------------------------------
+
+
+def test_debug_log_marks_the_milestones_without_secrets(fake_e2633, caplog) -> None:
+    caplog.set_level("DEBUG", logger="custom_components.zte_tracker.zteclient.zte_client")
+    c = _client(fake_e2633)
+    assert c.login()
+    assert len(c.get_wifi_devices()) == 2
+    fake_e2633.expire_sessions = 1
+    assert c.get_wifi_devices() is None
+    assert c.login()
+    fake_e2633.data_status = 404
+    assert c.get_wifi_devices() is None
+    fake_e2633.data_status = 200
+    wrong = _client(fake_e2633, "wrong-password-used-only-in-this-test")
+    assert not wrong.login()
+
+    text = "\n".join(r.getMessage() for r in caplog.records).replace(fake_e2633.host, "<router>")
+    for milestone in (
+        "E2633 login: starting",
+        "E2633 login: session opened",
+        "E2633 session expired",
+        "E2633 login: starting (after an expired session)",
+        "E2633 read 2 WiFi clients",
+        "E2633 login: refused by the router",
+        "HTTPError",
+    ):
+        assert milestone in text, milestone
+    for secret in (
+        fake.PASSWORD, "wrong-password-used-only-in-this-test", fake.LOGIN_TOKEN, fake.SESSION_TOKEN,
+        "SID=ok", "02:00:00:00:00:01", "02:00:00:00:00:02", "192.0.2.", "host-a", "host-b",
+    ):
+        assert secret not in text, secret
+
+
+def test_debug_log_names_the_error_class_for_a_lost_network(fake_e2633, caplog) -> None:
+    caplog.set_level("DEBUG", logger="custom_components.zte_tracker.zteclient.zte_client")
+    c = _client(fake_e2633)
+    fake_e2633.stop()
+    assert not c.login()
+    assert any("E2633 login failed (ConnectionError)" in r.getMessage() for r in caplog.records)

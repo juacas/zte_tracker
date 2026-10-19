@@ -76,16 +76,18 @@ REUSE_MODES = pytest.mark.parametrize(
 )
 
 
+@pytest.mark.parametrize("status", [503, 404])
 @REUSE_MODES
 @pytest.mark.asyncio
 async def test_failed_read_does_not_flip_tracked_devices_to_away(
-    mock_hass, fake_e2633, session_reuse
+    mock_hass, fake_e2633, session_reuse, status
 ) -> None:
     coordinator = _coordinator(mock_hass, fake_e2633, session_reuse=session_reuse)
     await _poll(coordinator)
     _assert_both_connected(coordinator)
 
-    fake_e2633.data_status = 503  # the router answers, but the client list cannot be read
+    # The router answers and the session is still good, but the client list cannot be read.
+    fake_e2633.data_status = status
     await _poll(coordinator)
     assert coordinator.available is False
     assert coordinator.data["router_info"]["status"] == "unavailable"
@@ -144,3 +146,46 @@ async def test_refused_credentials_are_not_retried_every_poll(
         await _poll(coordinator)
         assert coordinator.available is False
     assert fake_e2633.login_count == 1, "the admin account must not be hammered"
+
+
+@pytest.mark.asyncio
+async def test_default_mode_polls_share_one_login(mock_hass, fake_e2633) -> None:
+    """Default settings (Persistent session off): the coordinator calls login() and logout() on every
+    poll. With no known E2633 logout request, a new login per poll would leave one orphan session per
+    poll on the router, so five polls must be one login."""
+    coordinator = _coordinator(mock_hass, fake_e2633, session_reuse=False)
+    for _ in range(5):
+        await _poll(coordinator)
+        _assert_both_connected(coordinator)
+    assert fake_e2633.login_count == 1
+
+
+@pytest.mark.asyncio
+async def test_default_mode_expired_session_logs_in_exactly_once_more(
+    mock_hass, fake_e2633
+) -> None:
+    coordinator = _coordinator(mock_hass, fake_e2633, session_reuse=False)
+    await _poll(coordinator)
+    fake_e2633.expire_sessions = 1
+    await _poll(coordinator)  # the read finds the login page; this poll is unavailable
+    assert coordinator.available is False
+    assert coordinator.is_device_active(MAC_A)
+    await _poll(coordinator)
+    _assert_both_connected(coordinator)
+    await _poll(coordinator)
+    assert fake_e2633.login_count == 2
+
+
+@pytest.mark.asyncio
+async def test_unload_forgets_the_session(mock_hass, fake_e2633) -> None:
+    from custom_components.zte_tracker import async_unload_entry
+
+    coordinator = _coordinator(mock_hass, fake_e2633, session_reuse=False)
+    await _poll(coordinator)
+    assert coordinator.client.session is not None
+    mock_hass.data = {DOMAIN: {coordinator.entry.entry_id: coordinator}}
+    mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+    assert await async_unload_entry(mock_hass, coordinator.entry) is True
+    assert coordinator.client.session is None
+    assert coordinator.client.login_data is None
