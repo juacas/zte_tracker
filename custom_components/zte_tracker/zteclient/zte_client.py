@@ -156,12 +156,21 @@ _MODELS["H168A"] = {
 _MODELS["F6645P"] = _MODELS["F6640"]
 _MODELS["H3600P"] = _MODELS["H288A"]
 _MODELS["H6645P"] = _MODELS["H288A"]
-_MODELS["H3640"] = _MODELS["H288A"]
+# ZTE H3640: shares H288A's endpoints but the WAN data tag
+# wan_internetstatus_lua.lua&TypeUplink=2&pageType=1 is not served by
+# recent H3640 firmwares - the router answers IF_ERRORSTR SessionTimeout.
+# Re-login and retry does not help (the tag is missing, not the session,
+# so the #75 retry path cannot recover either). The wan_internet_lua.lua
+# variant works on those firmwares and returns the same
+# ID_WAN_COMFIG/Instance XML shape - same override as H388X (#44).
+_MODELS["H3640"] = {
+    **_MODELS["H288A"],
+    "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1",
+}
 _MODELS["H6745"] = _MODELS["H288A"]
 _MODELS["E2631"] = _MODELS["E2631"]
 _MODELS["SR7410"] = _MODELS["E2631"]
 _MODELS["SR7110"] = _MODELS["E2631"]
-_MODELS["F680"] = _MODELS["F6640"]
 # ZTE H2640: shares H288A's endpoints but the router verifies an
 # unencrypted SHA256 hex digest in the reboot Check header, not RSA-encrypted.
 # Also a VDSL/ADSL modem: WAN status via dsl_interface_status_lua.lua.
@@ -190,6 +199,44 @@ _MODELS["F6600P"] = {
     "tag_pon_optical_data": "optical_info_lua.lua",
 }
 _MODELS["F6745Q"] = _MODELS["F6600P"]
+# Distinct model, not a plain F6640 alias: only confirmed F680 units expose
+# parental-control data in firewall_parentctrl_lua.lua, so probing and switch
+# creation stay opt-in per model.
+_MODELS["F680"] = {
+    **_MODELS["F6640"],
+    "tag_parentctrl_view": "parentCtrl&Menu3Location=0",
+    "tag_parentctrl_data": "firewall_parentctrl_lua.lua",
+}
+
+
+_PUBLIC_KEY_4096_PEM = (
+    "-----BEGIN PUBLIC KEY-----\n"
+    "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAwlo/vZBnSJ2MyJ0dbNcw\n"
+    "DvzPqBN+O/BPvLX93GIJVSZmquJHD9X6Xn6VYeM9mRKzjEbXPlv73Dj/gjjtNj9j\n"
+    "Tq2QVyW2Sd4ZkY9e3h1ALCCCfkbjnmSqedyrcvXriTeW+J65jhBje6lTJbafmC5q\n"
+    "bGiItjt0OeOkT+Vb4S7hYPSWIjeYYBh+7Y/fg25Rt2a+RgC8dahvJ3ttB1LHXADr\n"
+    "oCm6q7G+lpbRAlpC8jjc0rZdS0c6HcBoYgzW8vxjj2fTuFy3CZZTrpPyTv/C8K6B\n"
+    "hjTnjRe6ocgFVyQ0RIYfx2hxSJcuauR57OzfMzlgFQv3RAXguDZtuVUFLO2sAiwL\n"
+    "ELph3Acfy9Eh58SHcswZvsOSXY0JNb0XeRM9gxpntLRfM6TB7f9hYtYTDw5oKdyN\n"
+    "BY+nnEa/IpBUjndGDrSs3Z4BxRbYcJEwkKQZkvw/5TpQYbkD6sTRVSlZPaXSjeCl\n"
+    "0hsLCttqwJqRZcjbWXrINBYFw8PYE14Xr9BCyPgqocdQh7FgvasVgG6u5mLR1PBZ\n"
+    "o4EFF/LdY0yvMG5rl9egBk1XD/UMayhRtmSQEUzYt3eEWLBbqJB6MbVJ2ygcv5EL\n"
+    "ReDY0SWXw1PIEbHeP51A/MyB6kwSgZwdoQW3JiaPnGHMaE0NqfAYPNiGJLMsmvT/\n"
+    "rNUI/8iSCW+WvSzx9tByUxsCAwEAAQ==\n"
+    "-----END PUBLIC KEY-----"
+)
+
+_PUBLIC_KEY_2048_PEM = (
+    "-----BEGIN PUBLIC KEY-----\n"
+    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAodPTerkUVCYmv28SOfRV\n"
+    "7UKHVujx/HjCUTAWy9l0L5H0JV0LfDudTdMNPEKloZsNam3YrtEnq6jqMLJV4ASb\n"
+    "1d6axmIgJ636wyTUS99gj4BKs6bQSTUSE8h/QkUYv4gEIt3saMS0pZpd90y6+B/9\n"
+    "hZxZE/RKU8e+zgRqp1/762TB7vcjtjOwXRDEL0w71Jk9i8VUQ59MR1Uj5E8X3WIc\n"
+    "fYSK5RWBkMhfaTRM6ozS9Bqhi40xlSOb3GBxCmliCifOJNLoO9kFoWgAIw5hkSIb\n"
+    "GH+4Csop9Uy8VvmmB+B3ubFLN35qIa5OG5+SDXn4L7FeAA5lRiGxRi8tsWrtew8w\n"
+    "nwIDAQAB\n"
+    "-----END PUBLIC KEY-----"
+)
 
 
 class zteClient:
@@ -1000,6 +1047,22 @@ class zteClient:
         ]
 
     @staticmethod
+    def _parse_instance_fields(node: Any) -> dict[str, str]:
+        """Flatten raw ParaName and ParaValue pairs, preserving _InstID."""
+        parsed: dict[str, str] = {}
+        if node is None:
+            return parsed
+        children = list(node)
+        for i in range(0, len(children), 2):
+            name_elem = children[i]
+            value_elem = children[i + 1] if i + 1 < len(children) else None
+            pname = name_elem.text if name_elem is not None else None
+            pvalue = value_elem.text if value_elem is not None else None
+            if pname and pvalue:
+                parsed[pname] = pvalue
+        return parsed
+
+    @staticmethod
     def _parse_instance(node: Any, coerce_numeric: bool = True) -> dict[str, Any]:
         """Flatten a ZTE <Instance> node into a dict.
 
@@ -1015,20 +1078,172 @@ class zteClient:
         error, and the intent is clearer.
         """
         parsed: dict[str, Any] = {}
-        if node is None:
-            return parsed
-        children = list(node)
-        for i in range(0, len(children), 2):
-            name_elem = children[i]
-            value_elem = children[i + 1] if i + 1 < len(children) else None
-            pname = name_elem.text if name_elem is not None else None
-            pvalue = value_elem.text if value_elem is not None else None
-            if pname and pvalue and pname != "_InstID":
-                if coerce_numeric and pvalue.isdigit():
-                    parsed[pname] = int(pvalue)
-                else:
-                    parsed[pname] = pvalue
+        for pname, pvalue in zteClient._parse_instance_fields(node).items():
+            if pname == "_InstID":
+                continue
+            if coerce_numeric and pvalue.isdigit():
+                parsed[pname] = int(pvalue)
+            else:
+                parsed[pname] = pvalue
         return parsed
+
+    def _open_parental_view(self) -> str:
+        """Open the parental-control page the way the web UI does; return its HTML."""
+        view_tag = self.paths.get("tag_parentctrl_view")
+        if not view_tag:
+            return ""
+        url = (
+            f"{self.base_url}/?_type={self.paths['type_first_request']}"
+            f"&_tag={view_tag}&_={self.get_guid()}"
+        )
+        r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+        self.log_request(r)
+        r.raise_for_status()
+        return r.text
+
+    def get_parental_controls(self) -> list[dict[str, Any]] | None:
+        """Fetch the model-gated parental-control rules as HA switch state.
+
+        Returns None when the read fails, so callers can tell it apart from a
+        router that has no rules.
+        """
+        tag = self.paths.get("tag_parentctrl_data")
+        if not tag or not self.session:
+            _LOGGER.debug(
+                "Parental controls skipped: model=%s has_parentctrl_tag=%s "
+                "has_session=%s (only the F680 profile exposes parental controls)",
+                self.model,
+                bool(tag),
+                bool(self.session),
+            )
+            return [] if not tag else None
+
+        try:
+            self._open_parental_view()
+            url = (
+                f"{self.base_url}/?_type={self.paths['type_main_request']}"
+                f"&_tag={tag}&_={self.get_guid()}"
+            )
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            self.log_request(r)
+            r.raise_for_status()
+            xml = self._parse_response(r.text)
+
+            error_str = xml.findtext("IF_ERRORSTR")
+            if error_str and error_str not in ("SUCC", "SUCCESS", "OK"):
+                raise Exception(f"Router error: {error_str}")
+            error_id = xml.findtext("IF_ERRORID")
+            if error_id is not None and error_id.strip() not in ("", "0"):
+                raise Exception(f"Router error id: {error_id.strip()}")
+            instances = xml.findall(".//Instance")
+            if error_str is None and error_id is None and not instances:
+                raise Exception("Router response carries no parental-control data")
+
+            rules: list[dict[str, Any]] = []
+            for instance in instances:
+                fields = self._parse_instance_fields(instance)
+                inst_id = fields.get("_InstID")
+                enable = fields.get("Enable")
+                if not inst_id or enable is None:
+                    continue
+                rules.append(
+                    {
+                        "id": inst_id,
+                        "name": (fields.get("Name") or inst_id).strip(),
+                        "enabled": enable.strip().lower()
+                        in ("1", "true", "yes", "on"),
+                    }
+                )
+
+            if instances and not rules:
+                raise Exception("Parental-control instances lack _InstID or Enable")
+
+            # Names and counts only: rule names and MACs stay out of the log.
+            _LOGGER.debug(
+                "Parental controls: %d rule(s) parsed from %d instance(s), "
+                "top-level nodes %s",
+                len(rules),
+                len(xml.findall(".//Instance")),
+                [child.tag for child in xml][:10],
+            )
+            self._parental_fetch_failed = False
+            return sorted(rules, key=lambda rule: str(rule["id"]))
+        except Exception as ex:
+            # Warn once per outage so a firmware without this page does not flood the log every poll.
+            log = (
+                _LOGGER.debug
+                if getattr(self, "_parental_fetch_failed", False)
+                else _LOGGER.warning
+            )
+            self._parental_fetch_failed = True
+            log("Failed to fetch parental controls: %s", ex)
+            return None
+
+    def set_parental_control_enabled(self, inst_id: str, enabled: bool) -> bool:
+        """Toggle an existing parental-control rule on routers that expose it."""
+        tag = self.paths.get("tag_parentctrl_data")
+        if not tag or not self.session:
+            return False
+
+        try:
+            view_html = self._open_parental_view()
+            match = re.search(r'_sessionTmpToken\s*=\s*["\']([^"\']+)["\']', view_html)
+            if match:
+                # The page embeds the token with \xNN escapes.
+                session_token = re.sub(
+                    r"\\x([0-9a-fA-F]{2})",
+                    lambda item: chr(int(item.group(1), 16)),
+                    match.group(1),
+                )
+            else:
+                session_token = self.get_session_token()
+            if not session_token:
+                raise ValueError("Session token missing for parental-control write")
+
+            post_data = urlencode(
+                {
+                    "IF_ACTION": "Apply",
+                    "Enable": "1" if enabled else "0",
+                    "_InstID": inst_id,
+                    "_sessionTOKEN": session_token,
+                }
+            )
+            url = (
+                f"{self.base_url}/?_type={self.paths['type_main_request']}"
+                f"&_tag={tag}&_={self.get_guid()}"
+            )
+            r = self.session.post(
+                url,
+                data=post_data,
+                headers={
+                    "Check": self._check_header(post_data),
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                },
+                verify=self.verify_ssl,
+                timeout=10,
+            )
+            self.log_request(r)
+            r.raise_for_status()
+            xml = self._parse_response(r.text)
+            error_str = xml.findtext("IF_ERRORSTR")
+            error_id = xml.findtext("IF_ERRORID")
+            if error_str is None and error_id is None:
+                raise Exception("Router response carries no result status")
+            if (error_id and error_id != "0") or (
+                error_str and error_str not in ("SUCC", "SUCCESS", "OK")
+            ):
+                raise Exception(
+                    f"Router error: {error_str or error_id or 'unknown error'}"
+                )
+            return True
+        except Exception as ex:
+            _LOGGER.warning(
+                "Failed to set parental-control rule %s to %s: %s",
+                inst_id,
+                enabled,
+                ex,
+            )
+            return False
 
     def _fetch_wan_status_xml(self) -> ET.Element:
         """GET the model's WAN status view, then its data page: the router only answers a data tag advertised by a preceding view request in the same session (#75)."""
@@ -1238,7 +1453,7 @@ class zteClient:
             _LOGGER.warning(f"Failed to fetch PON optical info: {ex}")
         return pon_attrs
 
-    # "check" is the SHA-256 of the E2633 login body: keep it out of the log.
+    # "check" is the signed or hashed request body (E2633 login, reboot, parental write): keep it out of the log.
     _SENSITIVE_HEADERS = frozenset({"cookie", "authorization", "set-cookie", "check"})
 
     def log_request(self, r):
@@ -1395,6 +1610,23 @@ class zteClient:
         _LOGGER.debug("Parsed %d valid devices", len(devices))
         return devices
 
+    def _check_header(self, post_data: str, encrypted: bool = True) -> str:
+        """Build the Check header the router verifies on signed form POSTs."""
+        digest_str = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
+        if not encrypted:
+            # H2640 and similar: the router directly verifies
+            # SHA256(post_data) in hexadecimal, without RSA encryption.
+            return digest_str
+        # F6600P uses a 4096-bit RSA key, other models use 2048-bit
+        pub_key_pem = (
+            _PUBLIC_KEY_4096_PEM if self.model == "F6600P" else _PUBLIC_KEY_2048_PEM
+        )
+        public_key = serialization.load_pem_public_key(pub_key_pem.encode("utf-8"))
+        encrypted_digest = public_key.encrypt(
+            digest_str.encode("utf-8"), padding.PKCS1v15()
+        )
+        return base64.b64encode(encrypted_digest).decode("utf-8")
+
     def reboot(self) -> bool:
         """Reboot the router using the secure endpoint."""
         if self.paths.get("login_style") == "cmcc_form":
@@ -1419,51 +1651,10 @@ class zteClient:
                 return False
 
             post_data = f"IF_ACTION=Restart&Btn_restart=&_sessionTOKEN={session_token}"
-            digest_str = hashlib.sha256(post_data.encode("utf-8")).hexdigest()
-            if self.paths.get("reboot_check_encrypted", True):            
-                # F6600P uses a 4096-bit RSA key, other models use 2048-bit
-                if self.model == "F6600P":
-                    pub_key_pem = (
-                        "-----BEGIN PUBLIC KEY-----\n"
-                        "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAwlo/vZBnSJ2MyJ0dbNcw\n"
-                        "DvzPqBN+O/BPvLX93GIJVSZmquJHD9X6Xn6VYeM9mRKzjEbXPlv73Dj/gjjtNj9j\n"
-                        "Tq2QVyW2Sd4ZkY9e3h1ALCCCfkbjnmSqedyrcvXriTeW+J65jhBje6lTJbafmC5q\n"
-                        "bGiItjt0OeOkT+Vb4S7hYPSWIjeYYBh+7Y/fg25Rt2a+RgC8dahvJ3ttB1LHXADr\n"
-                        "oCm6q7G+lpbRAlpC8jjc0rZdS0c6HcBoYgzW8vxjj2fTuFy3CZZTrpPyTv/C8K6B\n"
-                        "hjTnjRe6ocgFVyQ0RIYfx2hxSJcuauR57OzfMzlgFQv3RAXguDZtuVUFLO2sAiwL\n"
-                        "ELph3Acfy9Eh58SHcswZvsOSXY0JNb0XeRM9gxpntLRfM6TB7f9hYtYTDw5oKdyN\n"
-                        "BY+nnEa/IpBUjndGDrSs3Z4BxRbYcJEwkKQZkvw/5TpQYbkD6sTRVSlZPaXSjeCl\n"
-                        "0hsLCttqwJqRZcjbWXrINBYFw8PYE14Xr9BCyPgqocdQh7FgvasVgG6u5mLR1PBZ\n"
-                        "o4EFF/LdY0yvMG5rl9egBk1XD/UMayhRtmSQEUzYt3eEWLBbqJB6MbVJ2ygcv5EL\n"
-                        "ReDY0SWXw1PIEbHeP51A/MyB6kwSgZwdoQW3JiaPnGHMaE0NqfAYPNiGJLMsmvT/\n"
-                        "rNUI/8iSCW+WvSzx9tByUxsCAwEAAQ==\n"
-                        "-----END PUBLIC KEY-----"
-                    )
-                else:
-                    pub_key_pem = (
-                        "-----BEGIN PUBLIC KEY-----\n"
-                        "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAodPTerkUVCYmv28SOfRV\n"
-                        "7UKHVujx/HjCUTAWy9l0L5H0JV0LfDudTdMNPEKloZsNam3YrtEnq6jqMLJV4ASb\n"
-                        "1d6axmIgJ636wyTUS99gj4BKs6bQSTUSE8h/QkUYv4gEIt3saMS0pZpd90y6+B/9\n"
-                        "hZxZE/RKU8e+zgRqp1/762TB7vcjtjOwXRDEL0w71Jk9i8VUQ59MR1Uj5E8X3WIc\n"
-                        "fYSK5RWBkMhfaTRM6ozS9Bqhi40xlSOb3GBxCmliCifOJNLoO9kFoWgAIw5hkSIb\n"
-                        "GH+4Csop9Uy8VvmmB+B3ubFLN35qIa5OG5+SDXn4L7FeAA5lRiGxRi8tsWrtew8w\n"
-                        "nwIDAQAB\n"
-                        "-----END PUBLIC KEY-----"
-                    )
-                public_key = serialization.load_pem_public_key(
-                    pub_key_pem.encode("utf-8")
-                )
-                encrypted_digest = public_key.encrypt(
-                    digest_str.encode("utf-8"), padding.PKCS1v15()
-                )
-                check_header = base64.b64encode(encrypted_digest).decode("utf-8")
-            else:
-                # H2640 and similar: the router directly verifies
-                # SHA256(post_data) in hexadecimal, without RSA encryption.
-                check_header = digest_str
             headers = {
-                "Check": check_header,
+                "Check": self._check_header(
+                    post_data, self.paths.get("reboot_check_encrypted", True)
+                ),
                 "Content-Type": "application/x-www-form-urlencoded",
             }
 
