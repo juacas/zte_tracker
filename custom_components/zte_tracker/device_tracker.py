@@ -194,34 +194,11 @@ async def async_setup_entry(
     # Add initial entities
     _async_add_entities()
 
-    def _mark_undetected_entities():
-        entity_registry = er.async_get(hass)
-        for entity_id, entity in entity_registry.entities.items():
-            if entity.domain == "device_tracker" and entity.platform == DOMAIN:
-                # unique_id IS the MAC address for a ScannerEntity - see note
-                # in _async_add_entities above. No entry_id prefix is ever
-                # involved, regardless of what _attr_unique_id was set to.
-                mac = entity.unique_id
-                if not mac:
-                    continue
-                devices = (
-                    coordinator.data.get("devices", {}) if coordinator.data else {}
-                )
-                device = devices.get(mac)
-                if not device or not device.get("active"):
-                    tracker_entity = hass.states.get(entity_id)
-                    if tracker_entity:
-                        attrs = dict(tracker_entity.attributes)
-                        attrs["active"] = False
-                        hass.states.async_set(entity_id, "not_home", attrs)
-
-    # Listen for new devices and mark undetected entities after each scan
-    def _scan_listener():
-        _async_add_entities()
-        _mark_undetected_entities()
-
-    coordinator.async_add_listener(_scan_listener)
-    # Listen for new devices
+    # Re-run discovery after every scan. Absent devices need no extra write:
+    # is_connected already returns False for them, so the entity's own state
+    # update reports not_home. (A second, out-of-band hass.states.async_set
+    # that added an "active" attribute used to run here; the entity then wrote
+    # its state without it, so every poll stored each absent device twice.)
     coordinator.async_add_listener(_async_add_entities)
 
 

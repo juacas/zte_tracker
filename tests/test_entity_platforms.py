@@ -438,7 +438,8 @@ async def test_device_tracker_setup_creates_entities_and_assigns_area(
     entity_registry.async_update_entity.assert_called_once_with(
         "device_tracker.phone", area_id="office"
     )
-    assert coordinator.async_add_listener.call_count == 2
+    # One listener per scan; a second one used to write absent devices again.
+    assert coordinator.async_add_listener.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -524,7 +525,7 @@ async def test_device_tracker_setup_respects_registration_flag(mock_hass) -> Non
 
 
 @pytest.mark.asyncio
-async def test_device_tracker_setup_recreates_registry_entities_and_marks_them_offline(
+async def test_device_tracker_setup_recreates_registry_entities_offline_without_extra_writes(
     mock_hass,
 ) -> None:
     """Registry devices should survive restarts and missing scans."""
@@ -581,9 +582,8 @@ async def test_device_tracker_setup_recreates_registry_entities_and_marks_them_o
         scan_listener = coordinator.async_add_listener.call_args_list[0].args[0]
         scan_listener()
 
-        assert mock_hass.states.async_set.call_count == 2
-        mock_hass.states.async_set.assert_any_call(
-            "device_tracker.known_phone",
-            "not_home",
-            {"friendly_name": "Known Phone", "active": False},
-        )
+        # Absent devices report not_home through the entity itself. Writing
+        # them again with hass.states.async_set (plus an "active" attribute
+        # the entity does not have) stored every absent device twice per poll.
+        assert restored.is_connected is False
+        mock_hass.states.async_set.assert_not_called()
