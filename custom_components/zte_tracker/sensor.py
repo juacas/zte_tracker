@@ -15,6 +15,124 @@ from homeassistant.util import dt as ha_dt
 from .const import DOMAIN, ICON
 from .coordinator import ZteDataCoordinator
 
+try:
+    from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+
+    _DEV_SIGNAL = SensorDeviceClass.SIGNAL_STRENGTH
+    _STATE_MEASUREMENT = SensorStateClass.MEASUREMENT
+except ImportError:  # pragma: no cover - fallback for lightweight test stubs
+    _DEV_SIGNAL = "signal_strength"
+    _STATE_MEASUREMENT = "measurement"
+
+_CELLULAR_METRIC_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "cellular_network_type",
+        "name": "Cellular Network Type",
+        "icon": "mdi:antenna",
+        "extra_keys": (
+            "cellular_operator",
+            "cellular_plmn",
+            "cellular_roaming",
+            "cellular_ca_status",
+            "cellular_signal_bars",
+        ),
+    },
+    {
+        "key": "cellular_signal_bars",
+        "name": "Cellular Signal Bars",
+        "icon": "mdi:signal",
+        "state_class": _STATE_MEASUREMENT,
+    },
+    {
+        "key": "lte_band",
+        "name": "LTE Band",
+        "icon": "mdi:radio-tower",
+        "extra_keys": (
+            "lte_cell_id",
+            "lte_cell_id_hex",
+            "lte_pci",
+            "lte_earfcn",
+            "lte_bandwidth",
+            "cellular_ca_status",
+            "lte_ca_scell_info",
+            "lte_cells",
+        ),
+    },
+    {
+        "key": "lte_rsrp_dbm",
+        "name": "LTE RSRP",
+        "icon": "mdi:signal-4g",
+        "unit": "dBm",
+        "device_class": _DEV_SIGNAL,
+        "state_class": _STATE_MEASUREMENT,
+    },
+    {
+        "key": "lte_rsrq_db",
+        "name": "LTE RSRQ",
+        "icon": "mdi:signal-4g",
+        "unit": "dB",
+        "state_class": _STATE_MEASUREMENT,
+    },
+    {
+        "key": "lte_sinr_db",
+        "name": "LTE SINR",
+        "icon": "mdi:signal-4g",
+        "unit": "dB",
+        "state_class": _STATE_MEASUREMENT,
+    },
+    {
+        "key": "lte_rssi_dbm",
+        "name": "LTE RSSI",
+        "icon": "mdi:signal-4g",
+        "unit": "dBm",
+        "device_class": _DEV_SIGNAL,
+        "state_class": _STATE_MEASUREMENT,
+    },
+    {
+        "key": "nr5g_band",
+        "name": "5G NR Band",
+        "icon": "mdi:signal-5g",
+        "extra_keys": (
+            "nr5g_cell_id",
+            "nr5g_cell_id_hex",
+            "nr5g_pci",
+            "nr5g_arfcn",
+            "nr5g_bandwidth",
+            "nr5g_cells",
+        ),
+    },
+    {
+        "key": "nr5g_rsrp_dbm",
+        "name": "5G NR RSRP",
+        "icon": "mdi:signal-5g",
+        "unit": "dBm",
+        "device_class": _DEV_SIGNAL,
+        "state_class": _STATE_MEASUREMENT,
+    },
+    {
+        "key": "nr5g_rsrq_db",
+        "name": "5G NR RSRQ",
+        "icon": "mdi:signal-5g",
+        "unit": "dB",
+        "state_class": _STATE_MEASUREMENT,
+    },
+    {
+        "key": "nr5g_sinr_db",
+        "name": "5G NR SINR",
+        "icon": "mdi:signal-5g",
+        "unit": "dB",
+        "state_class": _STATE_MEASUREMENT,
+    },
+    {
+        "key": "nr5g_rssi_dbm",
+        "name": "5G NR RSSI",
+        "icon": "mdi:signal-5g",
+        "unit": "dBm",
+        "device_class": _DEV_SIGNAL,
+        "state_class": _STATE_MEASUREMENT,
+    },
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -24,12 +142,16 @@ async def async_setup_entry(
     """Set up ZTE sensor from config entry."""
     coordinator: ZteDataCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    async_add_entities(
-        [
-            ZteRouterSensor(coordinator, entry),
-            ZteDeviceCountSensor(coordinator, entry),
-        ]
-    )
+    entities: list[SensorEntity] = [
+        ZteRouterSensor(coordinator, entry),
+        ZteDeviceCountSensor(coordinator, entry),
+    ]
+    paths = getattr(getattr(coordinator, "client", None), "paths", None) or {}
+    if paths.get("cellular_metrics"):
+        for spec in _CELLULAR_METRIC_SPECS:
+            entities.append(ZteCellularMetricSensor(coordinator, entry, spec))
+
+    async_add_entities(entities)
 
 
 class ZteBaseSensor(CoordinatorEntity, SensorEntity):
@@ -115,4 +237,48 @@ class ZteDeviceCountSensor(ZteBaseSensor):
         return {
             "devices": device_list,
             "num_devices": len([d for d in devices.values() if d.get("active")]),
+        }
+
+
+class ZteCellularMetricSensor(ZteBaseSensor):
+    """Sensor exposing a 5G NR / 4G LTE radio metric from router_info."""
+
+    def __init__(
+        self,
+        coordinator: ZteDataCoordinator,
+        entry: ConfigEntry,
+        spec: dict[str, Any],
+    ) -> None:
+        """Initialize the cellular metric sensor."""
+        super().__init__(coordinator, entry)
+        self._key: str = spec["key"]
+        self._extra_keys: tuple[str, ...] = spec.get("extra_keys", ())
+        self._attr_name = f"ZTE Router {coordinator.client.host} {spec['name']}"
+        self._attr_unique_id = f"{entry.entry_id}_{self._key}"
+        self._attr_icon = spec.get("icon", ICON)
+        if "unit" in spec:
+            self._attr_native_unit_of_measurement = spec["unit"]
+        if "device_class" in spec:
+            self._attr_device_class = spec["device_class"]
+        if "state_class" in spec:
+            self._attr_state_class = spec["state_class"]
+
+    @property
+    def native_value(self) -> Any:
+        """Return the current value of the cellular metric."""
+        data = self.coordinator.data or {}
+        router_info = data.get("router_info", {})
+        return router_info.get(self._key)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed cell attributes when configured for this sensor."""
+        if not self._extra_keys:
+            return {}
+        data = self.coordinator.data or {}
+        router_info = data.get("router_info", {})
+        return {
+            key: router_info[key]
+            for key in self._extra_keys
+            if key in router_info and router_info[key] is not None
         }
