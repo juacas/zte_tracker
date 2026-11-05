@@ -190,6 +190,48 @@ async def test_sensor_setup_and_properties(mock_hass) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cellular_metric_sensors_setup_for_g5b(mock_hass) -> None:
+    """Cellular models like G5B should expose dedicated 5G NR and LTE sensors."""
+    entry = _entry()
+    coordinator = _coordinator(
+        router_info={
+            "ModelName": "G5B",
+            "cellular_network_type": "ENDC",
+            "cellular_operator": "3",
+            "cellular_plmn": "27202",
+            "cellular_signal_bars": 5,
+            "lte_band": "B3",
+            "lte_cell_id": 1276716,
+            "lte_pci": 339,
+            "lte_rsrp_dbm": -87.0,
+            "nr5g_band": "n78",
+            "nr5g_pci": 399,
+            "nr5g_rsrp_dbm": -87.0,
+            "nr5g_sinr_db": 18.5,
+        }
+    )
+    coordinator.client.model = "G5B"
+    coordinator.client.paths = {"api_type": "goform", "cellular_metrics": True}
+    mock_hass.data = {DOMAIN: {entry.entry_id: coordinator}}
+    added: list = []
+
+    await sensor.async_setup_entry(mock_hass, entry, added.extend)
+
+    assert len(added) == 2 + len(sensor._CELLULAR_METRIC_SPECS)
+    nr_band = next(
+        e for e in added if getattr(e, "unique_id", "") == "entry-1_nr5g_band"
+    )
+    assert nr_band.native_value == "n78"
+    assert nr_band.extra_state_attributes["nr5g_pci"] == 399
+
+    nr_sinr = next(
+        e for e in added if getattr(e, "unique_id", "") == "entry-1_nr5g_sinr_db"
+    )
+    assert nr_sinr.native_value == 18.5
+    assert nr_sinr.native_unit_of_measurement == "dB"
+
+
+@pytest.mark.asyncio
 async def test_switches_setup_and_toggle_behaviors(mock_hass) -> None:
     """The switches should proxy pause and registration changes."""
     entry = _entry()
