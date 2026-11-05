@@ -142,6 +142,33 @@ _MODELS["F680"] = {
     "tag_parentctrl_view": "parentCtrl&Menu3Location=0",
     "tag_parentctrl_data": "firewall_parentctrl_lua.lua",
 }
+# ZTE G5B (5G CPE, MC888x family): uses the JSON /goform/goform_get_cmd_process
+# and /goform/goform_set_cmd_process API rather than Lua/XML menuData tags, and
+# exposes detailed 5G NR and 4G LTE radio metrics.
+_MODELS["G5B"] = {
+    "api_type": "goform",
+    "cellular_metrics": True,
+    "default_scheme": "https",
+}
+
+_GOFORM_WAN_CMD = (
+    "loginfo,network_type,network_provider_fullname,rplmn_num,network_rmcc,network_rmnc,"
+    "network_simcard_roam,network_signalbar,wan_lte_ca,ppp_status,dhcp_wan_status,"
+    "pppoe_status,static_wan_status,opms_wan_mode,opms_wan_auto_mode,"
+    "wan_ipaddr,static_wan_ipaddr,ipv6_wan_ipaddr,"
+    "flux_realtime_time,flux_realtime_tx_thrpt,flux_realtime_rx_thrpt,"
+    "flux_monthly_rx_bytes,flux_monthly_tx_bytes,flux_monthly_time,"
+    "realtime_tx_bytes,realtime_rx_bytes,"
+    "network_cell_id,lte_pci,network_Z_PCI,wan_active_band,network_ZCELLINFO_band,"
+    "wan_active_channel,network_Z_dl_earfcn,bandwidth,network_lte_ca_pcell_band,"
+    "network_lte_ca_pcell_bandwidth,network_lte_ca_pcell_arfcn,"
+    "network_lte_ca_scell_band,network_lte_ca_scell_bandwidth,lte_ca_scell_arfcn,"
+    "network_lte_ca_scell_info,lte_multi_ca_scell_info,lte_multi_ca_scell_sig_info,"
+    "network_lte_rsrp,lte_rsrq,network_sinr,lte_snr,lte_rssi,network_rssi,"
+    "network_Z5g_CELL_ID,network_Z5g_PCI,nr5g_action_band,network_Z5g_CELLINFO_band,"
+    "nr5g_action_channel,network_Z5g_dlEarfcn,nr5g_nsa_bandwidth,"
+    "Z5g_rsrp,Z5g_rsrq,Z5g_SINR,Z5g_snr,Z5g_rssi,nr_multi_ca_scell_info"
+)
 
 
 _PUBLIC_KEY_4096_PEM = (
@@ -236,6 +263,61 @@ class zteClient:
             profiles[name] = paths
         return profiles
 
+    def _is_goform(self) -> bool:
+        """Return True when the configured model uses the ZTE goform JSON API."""
+        return self.paths.get("api_type") == "goform"
+
+    @staticmethod
+    def _sha256_upper(value: str) -> str:
+        """Return uppercase hexadecimal SHA-256 digest used by ZTE goform firmware."""
+        return hashlib.sha256(value.encode("utf-8")).hexdigest().upper()
+
+    def _goform_get(
+        self, cmd: str, multi_data: bool = True, timeout: int = 10
+    ) -> dict[str, Any]:
+        """Execute a GET query against /goform/goform_get_cmd_process."""
+        if not self.session:
+            raise RuntimeError("Session not initialized")
+        params: dict[str, Any] = {"isTest": "false", "cmd": cmd}
+        if multi_data:
+            params["multi_data"] = "1"
+        params["_"] = str(self.get_guid())
+        url = f"{self.base_url}/goform/goform_get_cmd_process?{urlencode(params)}"
+        r = self.session.get(url, verify=self.verify_ssl, timeout=timeout)
+        self.log_request(r)
+        r.raise_for_status()
+        return r.json()
+
+    def _goform_set(
+        self, data: dict[str, Any], timeout: int = 10
+    ) -> dict[str, Any]:
+        """Execute a POST command against /goform/goform_set_cmd_process."""
+        if not self.session:
+            raise RuntimeError("Session not initialized")
+        url = f"{self.base_url}/goform/goform_set_cmd_process"
+        payload = {"isTest": "false", **data}
+        r = self.session.post(
+            url, data=payload, verify=self.verify_ssl, timeout=timeout
+        )
+        self.log_request(r)
+        r.raise_for_status()
+        return r.json()
+
+    def _goform_compute_ad(self) -> str:
+        """Compute the AD verification digest required by authenticated goform POSTs."""
+        login_data = self.login_data or {}
+        rd0 = login_data.get("rd0")
+        rd1 = login_data.get("rd1")
+        if rd0 is None or rd1 is None:
+            ver = self._goform_get(
+                "Language,cr_version,wa_inner_version", multi_data=True
+            )
+            rd0 = str(ver.get("wa_inner_version") or "")
+            rd1 = str(ver.get("cr_version") or "")
+        rd_resp = self._goform_get("RD", multi_data=False)
+        rd = str(rd_resp.get("RD") or "")
+        return self._sha256_upper(self._sha256_upper(f"{rd0}{rd1}") + rd)
+
     def _setup_session(self) -> None:
         """Set up HTTP session with retry strategy and security settings."""
         self.session = Session()
@@ -259,6 +341,18 @@ class zteClient:
             }
         )
 
+        if self._is_goform():
+            # Goform CPE firmware returns empty strings if Referer is absent,
+            # and direct LAN requests should not be routed via env HTTP proxies.
+            self.session.trust_env = False
+            self.session.headers.update(
+                {
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": f"{self.base_url}/index.html",
+                }
+            )
+            return
+
         if self.mesh_topology:
             # Mesh topology requires browser-like session initialization:
             # 1. Page load to set cookies (_TESTCOOKIESUPPORT / SID)
@@ -278,8 +372,129 @@ class zteClient:
                 }
             )
 
+    def _login_goform(self) -> bool:
+        """Authenticate against ZTE goform JSON API (e.g. G5B)."""
+        try:
+            if self.login_data is not None and self.session is not None:
+                if self.login_data.get("login_need_refresh") == 0:
+                    try:
+                        info = self._goform_get("loginfo", multi_data=False)
+                        if str(info.get("loginfo") or "").lower() == "ok":
+                            _LOGGER.debug("Already logged in (goform), session active.")
+                            return True
+                    except Exception:
+                        pass
+
+            if self.session is None:
+                self._setup_session()
+            try:
+                ver_info = self._goform_get(
+                    "Language,cr_version,wa_inner_version", multi_data=True
+                )
+            except requests.exceptions.ConnectionError:
+                self.statusmsg = f"Cannot connect to router at {self.host}. Please check network and address."
+                return False
+            except requests.exceptions.Timeout:
+                self.statusmsg = f"Connection to router at {self.host} timed out."
+                return False
+            except Exception as e:
+                self.statusmsg = f"Error getting router version info: {e}"
+                return False
+
+            rd0 = str(ver_info.get("wa_inner_version") or "")
+            rd1 = str(ver_info.get("cr_version") or "")
+
+            try:
+                ld_info = self._goform_get("LD", multi_data=False)
+            except requests.exceptions.ConnectionError:
+                self.statusmsg = (
+                    f"Cannot connect to router at {self.host} (login token)."
+                )
+                return False
+            except requests.exceptions.Timeout:
+                self.statusmsg = (
+                    f"Connection to router at {self.host} timed out (login token)."
+                )
+                return False
+            except Exception as e:
+                self.statusmsg = f"Error getting login token: {e}"
+                return False
+
+            ld = str(ld_info.get("LD") or "")
+            if not ld:
+                self.statusmsg = "Empty login_token received from router."
+                return False
+
+            password_param = self._sha256_upper(
+                self._sha256_upper(self.password) + ld
+            )
+            try:
+                res = self._goform_set(
+                    {
+                        "goformId": "LOGIN",
+                        "user": self.username,
+                        "password": password_param,
+                    }
+                )
+            except requests.exceptions.ConnectionError:
+                self.statusmsg = (
+                    f"Cannot connect to router at {self.host} (login entry)."
+                )
+                return False
+            except requests.exceptions.Timeout:
+                self.statusmsg = (
+                    f"Connection to router at {self.host} timed out (login entry)."
+                )
+                return False
+            except Exception as e:
+                self.statusmsg = f"Error during login entry: {e}"
+                return False
+
+            result = str(res.get("result", ""))
+            if result in ("0", "4"):
+                self.login_data = {
+                    "login_need_refresh": 0,
+                    "rd0": rd0,
+                    "rd1": rd1,
+                    "result": result,
+                }
+                self.status = "on"
+                self.statusmsg = "Login successful."
+                return True
+
+            self.login_data = None
+            if result == "2":
+                self.statusmsg = "Login denied: Another user is currently logged in."
+                return False
+            if result in ("1", "3"):
+                try:
+                    lock_info = self._goform_get(
+                        "psw_fail_num_str,login_lock_time", multi_data=True
+                    )
+                    lock_time = int(lock_info.get("login_lock_time") or 0)
+                except Exception:
+                    lock_time = 0
+                if lock_time > 0:
+                    self.statusmsg = f"Router is locked for {lock_time} seconds: Too many login errors."
+                else:
+                    self.statusmsg = "Login denied: Bad password"
+                return False
+
+            self.statusmsg = f"Login denied: code {result}"
+            return False
+        except Exception as e:
+            self.statusmsg = f"Failed login: {e}"
+            _LOGGER.error(self.statusmsg)
+            self.login_data = None
+            if self.session:
+                self.session.close()
+                self.session = None
+            return False
+
     def login(self) -> bool:
         """Login procedure using ZTE challenge. Returns True if successful, False otherwise. Sets statusmsg for error reporting."""
+        if self._is_goform():
+            return self._login_goform()
         try:
             # Check if we are logged in already.
             if self.login_data is not None and self.session is not None:
@@ -447,6 +662,12 @@ class zteClient:
             if self.login_data is None or not self.session:
                 return
 
+            if self._is_goform():
+                ad = self._goform_compute_ad()
+                self._goform_set({"goformId": "LOGOUT", "AD": ad})
+                _LOGGER.debug("Logged out successfully (goform)")
+                return
+
             r = self.session.post(
                 f"{self.base_url}?_type=loginData&_tag=logout_entry",
                 data={"IF_LogOff": "1"},
@@ -486,8 +707,83 @@ class zteClient:
             _LOGGER.error("Error getting device response: %s", e)
             return None
 
+    def _get_goform_hostname_map(self) -> dict[str, str]:
+        """Fetch user-customized MAC -> hostname overrides on goform routers."""
+        custom_names: dict[str, str] = {}
+        try:
+            resp = self._goform_get("hostNameList", multi_data=False)
+            entries = resp.get("devices") or resp.get("hostNameList") or []
+            if isinstance(entries, list):
+                for item in entries:
+                    if isinstance(item, dict):
+                        mac = str(item.get("mac") or "").strip().upper()
+                        name = str(item.get("hostname") or "").strip()
+                        if mac and name and name != "--":
+                            custom_names[mac] = name
+            elif isinstance(entries, str):
+                for part in entries.split(";"):
+                    if "," in part:
+                        mac_raw, name_raw = part.split(",", 1)
+                        mac = mac_raw.strip().upper()
+                        name = name_raw.strip()
+                        if mac and name and name != "--":
+                            custom_names[mac] = name
+        except Exception as ex:
+            _LOGGER.debug("Could not fetch goform hostNameList: %s", ex)
+        return custom_names
+
+    @staticmethod
+    def _clean_goform_hostname(raw_name: Any, mac: str, custom_map: dict[str, str]) -> str:
+        """Resolve a goform station hostname, preferring custom_map and dropping '--'."""
+        if mac in custom_map:
+            return custom_map[mac]
+        name = str(raw_name or "").strip()
+        if name in ("--", "unknown", "Unknown"):
+            return ""
+        return name
+
+    def _get_lan_devices_goform(self) -> list[dict[str, Any]] | None:
+        """Fetch connected LAN devices via goform lan_station_list."""
+        try:
+            if not self.session:
+                raise RuntimeError("Session not initialized")
+            data = self._goform_get("lan_station_list", multi_data=False)
+            custom_map = self._get_goform_hostname_map()
+            raw_list = data.get("lan_station_list") or []
+            devices: list[dict[str, Any]] = []
+            if isinstance(raw_list, list):
+                for item in raw_list:
+                    if not isinstance(item, dict):
+                        continue
+                    mac = str(item.get("mac_addr") or "").strip().upper()
+                    if not mac:
+                        continue
+                    devices.append(
+                        {
+                            "Active": True,
+                            "IconType": None,
+                            "NetworkType": "LAN",
+                            "MACAddress": mac,
+                            "IPAddress": str(item.get("ip_addr") or "").strip(),
+                            "HostName": self._clean_goform_hostname(
+                                item.get("hostname"), mac, custom_map
+                            ),
+                            "Port": "LAN",
+                            "LinkTime": str(item.get("connect_time") or "").strip(),
+                            "ConnectTime": "",
+                        }
+                    )
+            self.statusmsg = "OK"
+            return devices
+        except Exception as e:
+            self.statusmsg = f"Failed to get LAN devices: {e}"
+            _LOGGER.error(self.statusmsg)
+            return None
+
     def get_lan_devices(self) -> list[dict[str, Any]] | None:
         """Get the list of devices connected to the LAN ports."""
+        if self._is_goform():
+            return self._get_lan_devices_goform()
         try:
             if not self.session:
                 raise RuntimeError("Session not initialized")
@@ -516,8 +812,55 @@ class zteClient:
             _LOGGER.error(self.statusmsg)
             return None
 
+    def _get_wifi_devices_goform(self) -> list[dict[str, Any]] | None:
+        """Fetch connected WiFi devices via goform station_list."""
+        try:
+            if not self.session:
+                raise RuntimeError("Session not initialized")
+            data = self._goform_get("station_list", multi_data=False)
+            custom_map = self._get_goform_hostname_map()
+            raw_list = data.get("station_list") or []
+            devices: list[dict[str, Any]] = []
+            if isinstance(raw_list, list):
+                for item in raw_list:
+                    if not isinstance(item, dict):
+                        continue
+                    mac = str(item.get("mac_addr") or "").strip().upper()
+                    if not mac:
+                        continue
+                    iface = str(item.get("interfacetype") or "").strip()
+                    if any(b in iface for b in ("3", "4", "6")):
+                        port = "5GHz"
+                    elif iface:
+                        port = "2.4GHz"
+                    else:
+                        port = "WLAN"
+                    devices.append(
+                        {
+                            "Active": True,
+                            "IconType": None,
+                            "NetworkType": "WLAN",
+                            "MACAddress": mac,
+                            "IPAddress": str(item.get("ip_addr") or "").strip(),
+                            "HostName": self._clean_goform_hostname(
+                                item.get("hostname"), mac, custom_map
+                            ),
+                            "Port": port,
+                            "LinkTime": str(item.get("connect_time") or "").strip(),
+                            "ConnectTime": "",
+                        }
+                    )
+            self.statusmsg = "OK"
+            return devices
+        except Exception as e:
+            self.statusmsg = f"Failed to get WiFi devices: {e}"
+            _LOGGER.error(self.statusmsg)
+            return None
+
     def get_wifi_devices(self) -> list[dict[str, Any]] | None:
         """Get the list of devices connected to the wifi."""
+        if self._is_goform():
+            return self._get_wifi_devices_goform()
         try:
             if not self.session:
                 raise RuntimeError("Session not initialized")
@@ -705,11 +1048,42 @@ class zteClient:
 
         return devices if devices else None
 
+    def _get_router_details_goform(self) -> dict[str, Any] | None:
+        """Fetch router details via goform command process."""
+        try:
+            if not self.session:
+                raise RuntimeError("Session not initialized")
+            data = self._goform_get(
+                "hardware_version,wa_inner_version,web_version,system_uptime",
+                multi_data=True,
+            )
+            details: dict[str, Any] = {
+                "ManuFacturer": "ZTE",
+                "ModelName": self.model,
+            }
+            hw_ver = str(data.get("hardware_version") or "").strip()
+            sw_ver = str(
+                data.get("wa_inner_version") or data.get("web_version") or ""
+            ).strip()
+            uptime_raw = str(data.get("system_uptime") or "").strip()
+            if hw_ver:
+                details["HardwareVer"] = hw_ver
+            if sw_ver:
+                details["SoftwareVer"] = sw_ver
+            if uptime_raw.isdigit():
+                details["PowerOnTime"] = int(uptime_raw)
+            return details
+        except Exception as e:
+            _LOGGER.error("Error fetching router details (goform): %s", e)
+            return None
+
     def get_router_details(self) -> dict[str, Any] | None:
         """Get router details."""
         if not getattr(self, "query_router_details", True):
             _LOGGER.debug("Router details query disabled by client flag")
             return {}
+        if self._is_goform():
+            return self._get_router_details_goform()
         try:
             if not self.session:
                 raise RuntimeError("Session not initialized")
@@ -1043,11 +1417,351 @@ class zteClient:
             raise Exception(f"Router error: {error_str}")
         return xml
 
+    @staticmethod
+    def _to_int(val: Any) -> int | None:
+        if val is None:
+            return None
+        s = str(val).strip()
+        if not s or not s.lstrip("-").isdigit():
+            return None
+        return int(s)
+
+    @staticmethod
+    def _to_hex_int(val: Any) -> int | None:
+        if val is None:
+            return None
+        s = str(val).strip()
+        if not s:
+            return None
+        try:
+            return int(s, 16)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _to_float(val: Any) -> float | None:
+        if val is None:
+            return None
+        s = str(val).strip()
+        if not s:
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+
+    def _parse_goform_wan_status(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Parse WAN status and 5G/LTE radio metrics from goform command response."""
+        wan_attrs: dict[str, Any] = {}
+
+        ppp_status = str(data.get("ppp_status") or "").strip()
+        dhcp_status = str(data.get("dhcp_wan_status") or "").strip()
+        pppoe_status = str(data.get("pppoe_status") or "").strip()
+        static_status = str(data.get("static_wan_status") or "").strip()
+        wan_attrs["WAN_connected"] = (
+            ppp_status in ("ppp_connected", "ipv4_ipv6_connected", "ipv6_connected")
+            or dhcp_status == "1"
+            or pppoe_status in ("pppoe_connected", "ppp_connected")
+            or static_status == "static_wan_connected"
+        )
+
+        wan_ip = str(
+            data.get("wan_ipaddr") or data.get("static_wan_ipaddr") or ""
+        ).strip()
+        if wan_ip:
+            wan_attrs["WAN_public_ip"] = wan_ip
+
+        ipv6_ip = str(data.get("ipv6_wan_ipaddr") or "").strip()
+        if ipv6_ip and ipv6_ip != "::":
+            wan_attrs["WAN_ipv6_ip"] = ipv6_ip
+
+        wan_mode = str(data.get("opms_wan_mode") or "").strip()
+        if wan_mode:
+            wan_attrs["WAN_mode"] = wan_mode
+
+        uptime = self._to_int(data.get("flux_realtime_time"))
+        if uptime is not None:
+            wan_attrs["WAN_uptime"] = uptime
+
+        rx_bytes = self._to_int(data.get("flux_monthly_rx_bytes"))
+        if rx_bytes is None:
+            rx_bytes = self._to_int(data.get("realtime_rx_bytes"))
+        if rx_bytes is not None:
+            wan_attrs["WAN_rx_bytes"] = rx_bytes
+
+        tx_bytes = self._to_int(data.get("flux_monthly_tx_bytes"))
+        if tx_bytes is None:
+            tx_bytes = self._to_int(data.get("realtime_tx_bytes"))
+        if tx_bytes is not None:
+            wan_attrs["WAN_tx_bytes"] = tx_bytes
+
+        rx_thrpt = self._to_int(data.get("flux_realtime_rx_thrpt"))
+        if rx_thrpt is not None:
+            wan_attrs["WAN_rx_throughput_bps"] = rx_thrpt
+
+        tx_thrpt = self._to_int(data.get("flux_realtime_tx_thrpt"))
+        if tx_thrpt is not None:
+            wan_attrs["WAN_tx_throughput_bps"] = tx_thrpt
+
+        # General cellular status
+        network_type = str(data.get("network_type") or "").strip()
+        if network_type:
+            wan_attrs["cellular_network_type"] = network_type
+
+        operator = str(data.get("network_provider_fullname") or "").strip()
+        if operator:
+            wan_attrs["cellular_operator"] = operator
+
+        plmn = str(data.get("rplmn_num") or "").strip()
+        if not plmn:
+            rmcc = str(data.get("network_rmcc") or "").strip()
+            rmnc = str(data.get("network_rmnc") or "").strip()
+            if rmcc and rmnc:
+                plmn = f"{rmcc}{rmnc}"
+        if plmn:
+            wan_attrs["cellular_plmn"] = plmn
+
+        roaming = str(data.get("network_simcard_roam") or "").strip()
+        if roaming:
+            wan_attrs["cellular_roaming"] = roaming
+
+        signal_bars = self._to_int(data.get("network_signalbar"))
+        if signal_bars is not None:
+            wan_attrs["cellular_signal_bars"] = signal_bars
+
+        ca_status = str(data.get("wan_lte_ca") or "").strip()
+        if ca_status:
+            wan_attrs["cellular_ca_status"] = ca_status
+
+        # 4G / LTE cell metrics (System -> Device Information)
+        lte_cell_id_hex = str(data.get("network_cell_id") or "").strip()
+        lte_cell_id = self._to_hex_int(lte_cell_id_hex)
+        if lte_cell_id is not None:
+            wan_attrs["lte_cell_id"] = lte_cell_id
+            wan_attrs["lte_cell_id_hex"] = lte_cell_id_hex
+
+        lte_pci = self._to_hex_int(data.get("lte_pci") or data.get("network_Z_PCI"))
+        if lte_pci is not None:
+            wan_attrs["lte_pci"] = lte_pci
+
+        lte_band = str(
+            data.get("wan_active_band") or data.get("network_ZCELLINFO_band") or ""
+        ).strip()
+        if not lte_band and data.get("network_lte_ca_pcell_band"):
+            lte_band = f"LTE BAND {str(data['network_lte_ca_pcell_band']).strip()}"
+        if lte_band:
+            wan_attrs["lte_band"] = lte_band
+
+        lte_earfcn = self._to_int(
+            data.get("wan_active_channel")
+            or data.get("network_Z_dl_earfcn")
+            or data.get("network_lte_ca_pcell_arfcn")
+        )
+        if lte_earfcn is not None:
+            wan_attrs["lte_earfcn"] = lte_earfcn
+
+        lte_bw = str(data.get("bandwidth") or "").strip()
+        if not lte_bw and data.get("network_lte_ca_pcell_bandwidth"):
+            lte_bw = f"{str(data['network_lte_ca_pcell_bandwidth']).strip()}MHz"
+        if lte_bw:
+            wan_attrs["lte_bandwidth"] = lte_bw
+
+        lte_rsrp = self._to_float(data.get("network_lte_rsrp"))
+        if lte_rsrp is not None:
+            wan_attrs["lte_rsrp_dbm"] = lte_rsrp
+
+        lte_rsrq = self._to_float(data.get("lte_rsrq"))
+        if lte_rsrq is not None:
+            wan_attrs["lte_rsrq_db"] = lte_rsrq
+
+        lte_sinr = self._to_float(data.get("network_sinr") or data.get("lte_snr"))
+        if lte_sinr is not None:
+            wan_attrs["lte_sinr_db"] = lte_sinr
+
+        lte_rssi = self._to_float(data.get("lte_rssi") or data.get("network_rssi"))
+        if lte_rssi is not None:
+            wan_attrs["lte_rssi_dbm"] = lte_rssi
+
+        scell_info_raw = str(data.get("network_lte_ca_scell_info") or "").strip()
+        if scell_info_raw:
+            wan_attrs["lte_ca_scell_info"] = scell_info_raw
+
+        if any(
+            v is not None
+            for v in (lte_pci, lte_earfcn, lte_rsrp, lte_rsrq, lte_sinr, lte_rssi)
+        ) or lte_band:
+            pcc_band_num = (
+                re.sub(r"[^0-9]", "", lte_band)
+                if lte_band
+                else str(data.get("network_lte_ca_pcell_band") or "").strip()
+            )
+            lte_cells: list[dict[str, Any]] = [
+                {
+                    "id": "PCC",
+                    "pci": lte_pci,
+                    "state": "Active",
+                    "band": f"Band{pcc_band_num}" if pcc_band_num else lte_band,
+                    "dl_arfcn": lte_earfcn,
+                    "dl_bandwidth": lte_bw or None,
+                    "ul_configured": True,
+                    "rsrp_dbm": lte_rsrp,
+                    "rsrq_db": lte_rsrq,
+                    "sinr_db": lte_sinr,
+                    "rssi_dbm": lte_rssi,
+                }
+            ]
+            scell_sig_raw = str(
+                data.get("lte_multi_ca_scell_sig_info") or ""
+            ).strip()
+            if scell_info_raw:
+                scells = [s for s in scell_info_raw.split(";") if s]
+                sig_parts = [s for s in scell_sig_raw.split(";") if s]
+                for idx, scell in enumerate(scells):
+                    fields = scell.split(",")
+                    if len(fields) >= 6:
+                        scell_entry: dict[str, Any] = {
+                            "id": f"SCC{idx}",
+                            "pci": self._to_int(fields[1]),
+                            "state": "Active" if fields[2] == "2" else "Inactive",
+                            "band": f"Band{fields[3]}",
+                            "dl_arfcn": self._to_int(fields[4]),
+                            "dl_bandwidth": (
+                                fields[5]
+                                if fields[5].endswith("MHz")
+                                else f"{fields[5]}MHz"
+                            ),
+                        }
+                        if idx < len(sig_parts):
+                            sfields = sig_parts[idx].split(",")
+                            if len(sfields) >= 5:
+                                scell_entry["rsrp_dbm"] = self._to_float(sfields[0])
+                                scell_entry["rsrq_db"] = self._to_float(sfields[1])
+                                scell_entry["sinr_db"] = self._to_float(sfields[2])
+                                scell_entry["rssi_dbm"] = self._to_float(sfields[3])
+                                scell_entry["ul_configured"] = sfields[4] == "1"
+                        lte_cells.append(scell_entry)
+            wan_attrs["lte_cells"] = lte_cells
+
+        # 5G NR cell metrics (System -> Device Information)
+        nr_cell_id_hex = str(data.get("network_Z5g_CELL_ID") or "").strip()
+        nr_cell_id = self._to_hex_int(nr_cell_id_hex)
+        if nr_cell_id is not None:
+            wan_attrs["nr5g_cell_id"] = nr_cell_id
+            wan_attrs["nr5g_cell_id_hex"] = nr_cell_id_hex
+
+        nr_pci = self._to_hex_int(data.get("network_Z5g_PCI"))
+        if nr_pci is not None:
+            wan_attrs["nr5g_pci"] = nr_pci
+
+        nr_band_raw = str(
+            data.get("nr5g_action_band")
+            or data.get("network_Z5g_CELLINFO_band")
+            or ""
+        ).strip()
+        nr_band = nr_band_raw.upper() if nr_band_raw else ""
+        if nr_band:
+            wan_attrs["nr5g_band"] = nr_band
+
+        nr_arfcn = self._to_int(
+            data.get("network_Z5g_dlEarfcn") or data.get("nr5g_action_channel")
+        )
+        if nr_arfcn is not None:
+            wan_attrs["nr5g_arfcn"] = nr_arfcn
+
+        is_sa = network_type.upper() in ("SA", "NR5G-SA")
+        nr_bw = str(
+            (data.get("bandwidth") if is_sa else data.get("nr5g_nsa_bandwidth"))
+            or data.get("nr5g_nsa_bandwidth")
+            or ""
+        ).strip()
+        if nr_bw:
+            wan_attrs["nr5g_bandwidth"] = nr_bw
+
+        nr_rsrp = self._to_float(data.get("Z5g_rsrp"))
+        if nr_rsrp is not None:
+            wan_attrs["nr5g_rsrp_dbm"] = nr_rsrp
+
+        nr_rsrq = self._to_float(data.get("Z5g_rsrq"))
+        if nr_rsrq is not None:
+            wan_attrs["nr5g_rsrq_db"] = nr_rsrq
+
+        nr_sinr = self._to_float(data.get("Z5g_SINR") or data.get("Z5g_snr"))
+        if nr_sinr is not None:
+            wan_attrs["nr5g_sinr_db"] = nr_sinr
+
+        nr_rssi = self._to_float(data.get("Z5g_rssi"))
+        if nr_rssi is not None:
+            wan_attrs["nr5g_rssi_dbm"] = nr_rssi
+
+        if any(
+            v is not None
+            for v in (nr_pci, nr_arfcn, nr_rsrp, nr_rsrq, nr_sinr, nr_rssi)
+        ) or nr_band:
+            nr_cells: list[dict[str, Any]] = [
+                {
+                    "id": "PCC",
+                    "pci": nr_pci,
+                    "state": "Active",
+                    "band": nr_band or None,
+                    "dl_arfcn": nr_arfcn,
+                    "dl_bandwidth": nr_bw or None,
+                    "ul_configured": True,
+                    "rsrp_dbm": nr_rsrp,
+                    "rsrq_db": nr_rsrq,
+                    "sinr_db": nr_sinr,
+                    "rssi_dbm": nr_rssi,
+                }
+            ]
+            nr_scell_raw = str(data.get("nr_multi_ca_scell_info") or "").strip()
+            if nr_scell_raw:
+                for idx, scell in enumerate(
+                    s for s in nr_scell_raw.split(";") if s
+                ):
+                    fields = scell.split(",")
+                    if len(fields) >= 11:
+                        nr_cells.append(
+                            {
+                                "id": f"SCC{idx}",
+                                "pci": self._to_int(fields[1]),
+                                "state": "Active" if fields[2] == "2" else "Inactive",
+                                "band": fields[3].upper(),
+                                "dl_arfcn": self._to_int(fields[4]),
+                                "dl_bandwidth": fields[5],
+                                "ul_configured": fields[6] == "1",
+                                "rsrp_dbm": self._to_float(fields[7]),
+                                "rsrq_db": self._to_float(fields[8]),
+                                "sinr_db": self._to_float(fields[9]),
+                                "rssi_dbm": self._to_float(fields[10]),
+                            }
+                        )
+            wan_attrs["nr5g_cells"] = nr_cells
+
+        return wan_attrs
+
+    def _get_wan_status_goform(self) -> dict[str, Any]:
+        """Fetch WAN status and 5G/LTE radio metrics via goform API."""
+        try:
+            data = self._goform_get(_GOFORM_WAN_CMD, multi_data=True)
+            if (
+                str(data.get("loginfo") or "").lower() != "ok"
+                and not data.get("network_type")
+                and not data.get("ppp_status")
+            ):
+                self.logout()
+                if self.login():
+                    data = self._goform_get(_GOFORM_WAN_CMD, multi_data=True)
+            return self._parse_goform_wan_status(data)
+        except Exception as ex:
+            _LOGGER.warning("Failed to fetch WAN status (goform): %s", ex)
+            return {"WAN_status_error": str(ex)}
+
     def get_wan_status(self) -> dict[str, Any]:
         """Fetch WAN status and return relevant attributes."""
         if not getattr(self, "query_wan_status", True):
             _LOGGER.debug("WAN status query disabled by client flag")
             return {}
+        if self._is_goform():
+            return self._get_wan_status_goform()
 
         wan_attrs = {}
         try:
@@ -1413,6 +2127,17 @@ class zteClient:
             if not self.login():
                 _LOGGER.error("Login failed: %s", self.statusmsg)
                 return False
+
+            if self._is_goform():
+                ad = self._goform_compute_ad()
+                res = self._goform_set(
+                    {"goformId": "REBOOT_DEVICE", "AD": ad}, timeout=30
+                )
+                result = str(res.get("result") or "").strip().lower()
+                if result not in ("success", "0"):
+                    raise Exception(f"Router error: {res.get('result')}")
+                self.statusmsg = "Reboot command sent successfully."
+                return True
 
             # First load menuView url https://10.0.0.1/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_=1756621946066
             menu_view_url = f"{self.base_url}/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_={self.get_guid()}"
