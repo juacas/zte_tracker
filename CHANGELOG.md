@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.3.2
+
+- fix(H3640): use wan_internet_lua.lua for WAN status (#120)
+- Add F680 parental control switches (#114)
+- fix: stop writing absent devices to the state machine twice per poll (#127)
+
 ## v2.3.1
 
 - ci: add rc pre-release mode to Auto Release (#117)
