@@ -240,7 +240,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 try:
                     async with coordinator._client_lock:
                         await asyncio.wait_for(
-                            hass.async_add_executor_job(coordinator.client.logout),
+                            hass.async_add_executor_job(
+                                coordinator.client.logout, True
+                            ),
                             timeout=3,
                         )
                 except Exception as ex:  # noqa: BLE001

@@ -23,6 +23,10 @@ async def async_setup_entry(
     """Set up the ZTE reboot button for a config entry."""
     coordinator: ZteDataCoordinator = hass.data[DOMAIN][entry.entry_id]
 
+    # E2633: no reboot endpoint is known yet, so no button is created (pressing it would always fail).
+    if coordinator.client.paths.get("login_style") == "cmcc_form":
+        return
+
     async_add_entities([ZteRebootButton(coordinator, entry)])
 
 
