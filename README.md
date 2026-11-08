@@ -79,6 +79,12 @@ A modern, feature-rich integration for ZTE routers that provides comprehensive d
   - State: Number of connected devices
   - Attributes: list of devices detected.
 
+- **5G NR / 4G LTE Cellular Sensors** (cellular CPE models such as `G5B`)
+  - **Cellular Network Type** (`ENDC`, `SA`, `LTE`, etc.) — includes attributes `cellular_operator`, `cellular_plmn`, `cellular_roaming`, `cellular_ca_status`, `cellular_signal_bars`
+  - **Cellular Signal Bars** (`0`–`5`)
+  - **LTE Band**, **LTE RSRP** (`dBm`), **LTE RSRQ** (`dB`), **LTE SINR** (`dB`), **LTE RSSI** (`dBm`) — `LTE Band` includes `lte_cell_id`, `lte_cell_id_hex`, `lte_pci`, `lte_earfcn`, `lte_bandwidth`, `cellular_ca_status`, `lte_ca_scell_info`, and `lte_cells` (Primary + Secondary Component Carrier table from *System -> Device Information*)
+  - **5G NR Band**, **5G NR RSRP** (`dBm`), **5G NR RSRQ** (`dB`), **5G NR SINR** (`dB`), **5G NR RSSI** (`dBm`) — `5G NR Band` includes `nr5g_cell_id`, `nr5g_cell_id_hex`, `nr5g_pci`, `nr5g_arfcn`, `nr5g_bandwidth`, and `nr5g_cells` (5G PCC + SCC carrier table)
+
 ### Device Trackers
 
 - **Individual Device Trackers** (`device_tracker.zte_[mac_address]`)
@@ -202,6 +208,7 @@ For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topo
 | ZTE F6745Q  |     F6745Q      |    ✅    |
 | ZTE F6600P  |     F6600P      |    ✅    |
 | ZTE F8748   |      F8748      |    ✅    |
+| ZTE G5B       |       G5B       |    ✅    |
 | ZTE H168A V2.1 |     H168A      |    ✅    |
 | ZTE H169A     |      H169A      |    ✅    |
 | ZTE H2640     |      H2640      |    ✅    |
