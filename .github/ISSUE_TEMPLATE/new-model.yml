@@ -45,4 +45,4 @@ body:
       label: Raw XML (only if a maintainer asks for it)
       description: |
         The bundle only reports field shapes, not values, for anything it does not already recognize, so it can miss what a new page actually means.
-        If asked, follow [Reverse-Engineering the Router Web Console](https://github.com/juacas/zte_tracker/blob/master/README.md#reverse-engineering-the-router-web-console) to capture the real request/response and paste it here.
+        If asked, follow [Reverse-engineering a router](https://github.com/juacas/zte_tracker/blob/master/docs/reverse-engineering.md) to capture the real request/response and paste it here.

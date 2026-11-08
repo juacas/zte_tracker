@@ -10,418 +10,128 @@
 ![GitHub contributors](https://img.shields.io/github/contributors/juacas/zte_tracker)
 ![Maintenance](https://img.shields.io/maintenance/yes/2026)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/juacas/zte_tracker)
-![GitHub commits since tagged version](https://img.shields.io/github/commits-since/juacas/zte_tracker/v1.0.0)
+![GitHub commits since tagged version](https://img.shields.io/github/commits-since/juacas/zte_tracker/latest)
 ![GitHub last commit](https://img.shields.io/github/last-commit/juacas/zte_tracker)
 ![installation_badge](https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=integration%20usage&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.zte_tracker.total)
 > [!NOTE]
 > **Project stewardship**
 >
 > With huge generosity, [@lebdim](https://github.com/lebdim) has contributed substantially to this integration and is now in charge of the project. Please join me in thanking him and direct future maintenance and support contributions his way. The call remains open for additional maintainers and collaborators who would like to help keep the project growing.
+
 # ZTE Router Integration for Home Assistant
 
-A modern, feature-rich integration for ZTE routers that provides comprehensive device tracking and router management capabilities for Home Assistant.
-
-## ✨ Features
-
-### Device Tracking
-
-- **Real-time device monitoring** for both WiFi and LAN connections
-- **Mesh network support** — see all devices across controller and mesh agent nodes
-- **Intelligent device persistence** - devices remain tracked even during temporary disconnections
-- **Smart device naming** with fallback to cached names for better identification
-- **Network type detection** (WiFi/LAN) with SSID attribution and mesh node info
-
-### Router Management
-
-- **Router status monitoring** with connection health indicators: WAN uptime, WAN_remain_leasetime, WAN_error_message, WAN_connected (kindly requested by @cagnulein)
-- **Remote router reboot** capability through service calls (**Beta service!**)
-- **Register new devices switch** to control addition of new devices to the tracker or only update previously known devices.
-- **Parental Control switches** for ZTE F680: toggle the Enable state of parental-control rules already configured on the router
-- **Pause/resume scanning** to allow administrative access to router from other browsers
-- **Real-time statistics** including device counts and connection status
-- **Router details available as sensor attributes** (model, firmware, uptime, WAN info, etc.) Wan details and router details scans can be disabled to avoid extra load and warnings on unsupported models by setting the corresponding options to false.
-
-
-### Performance & Reliability
-
-- **Adaptive polling intervals** - automatically adjusts based on network stability
-- **Intelligent caching** - reduces router load and improves responsiveness
-- **Connection pooling** with retry mechanisms for better reliability
-- **Graceful error handling** with automatic recovery
-
-### Modern Home Assistant Integration
-
-- **Config Flow support** - easy setup through the UI
-- **Device Registry integration** - proper device tracking with unique identifiers
-- **DataUpdateCoordinator** - efficient data management following HA best practices
-- **Backward compatibility** - need to remove legacy YAML configuration
-- **HACS support** - easy installation and updates via Home Assistant Community Store
-
-## 📊 Entities Created
-
-### Sensors
-
-- **Router Status Sensor** (`sensor.zte_router_[ip]`)
-
-  - State: `on`, `paused`, or `unavailable`
-  - Attributes:
-    - device list
-    - scanning status
-    - last update time
-    - WAN uptime
-    - WAN_remain_leasetime
-    - WAN_error_message
-    - WAN_connected
-    - **DSL line** (VDSL/ADSL models such as the H2640): `DSL_line_status`, `DSL_upstream_rate_kbps`, `DSL_downstream_rate_kbps`, `DSL_upstream_max_rate_kbps`, `DSL_downstream_max_rate_kbps`, `DSL_upstream_noise_margin`, `DSL_downstream_noise_margin`, `DSL_upstream_attenuation`, `DSL_downstream_attenuation`, `DSL_profile`, `DSL_encapsulation`. Reported instead of the Ethernet WAN attributes, since DSL sync is not Internet reachability.
-    - **Router details**: model, firmware version, uptime, MAC address, IP address, Memory usage, CPU usage, etc.
-
-- **Device Count Sensor** (`sensor.zte_router_[ip]_connected_devices`)
-  - State: Number of connected devices
-  - Attributes: list of devices detected.
-
-- **5G NR / 4G LTE Cellular Sensors** (cellular CPE models such as `G5B`)
-  - **Cellular Network Type** (`ENDC`, `SA`, `LTE`, etc.) — includes attributes `cellular_operator`, `cellular_plmn`, `cellular_roaming`, `cellular_ca_status`, `cellular_signal_bars`
-  - **Cellular Signal Bars** (`0`–`5`)
-  - **LTE Band**, **LTE RSRP** (`dBm`), **LTE RSRQ** (`dB`), **LTE SINR** (`dB`), **LTE RSSI** (`dBm`) — `LTE Band` includes `lte_cell_id`, `lte_cell_id_hex`, `lte_pci`, `lte_earfcn`, `lte_bandwidth`, `cellular_ca_status`, `lte_ca_scell_info`, and `lte_cells` (Primary + Secondary Component Carrier table from *System -> Device Information*)
-  - **5G NR Band**, **5G NR RSRP** (`dBm`), **5G NR RSRQ** (`dB`), **5G NR SINR** (`dB`), **5G NR RSSI** (`dBm`) — `5G NR Band` includes `nr5g_cell_id`, `nr5g_cell_id_hex`, `nr5g_pci`, `nr5g_arfcn`, `nr5g_bandwidth`, and `nr5g_cells` (5G PCC + SCC carrier table)
-
-### Device Trackers
-
-- **Individual Device Trackers** (`device_tracker.zte_[mac_address]`)
-  - State: `home` or `not_home`
-  - Attributes: IP address, hostname, network type (WLAN/LAN), device icon, last seen time, port (SSID name or LAN port), link duration, connect time, mesh node.
-
-## 🎯 Services
-
-### `zte_tracker.reboot`
-
-Remotely reboots the router (supported by most router models).
-
-**Example usage:**
-
-```yaml
-service: zte_tracker.reboot
-```
-
-### `zte_tracker.refresh`
-
-Polls the router now instead of waiting for the next interval. Optional `host` limits it to one router. Calls are rate limited to one poll every 10 seconds. Handy in an automation, for example when the Companion app reports a phone joined the Wi-Fi.
-
-```yaml
-service: zte_tracker.refresh
-```
-
-### `zte_tracker.remove_tracked_entity`
-
-Removes a tracked device entity by MAC address.
-
-**Service data schema:**
-
-- `mac` (string, required): MAC address of the device to remove. Example: `E4:BC:AA:0D:B8:F6`
-
-**Example usage:**
-
-```yaml
-service: zte_tracker.remove_tracked_entity
-data:
-  mac: E4:BC:AA:0D:B8:F6
-```
-
-### `zte_tracker.export_support_bundle`
-
-Writes a JSON file into `zte_tracker_support/` describing the **structure** of your router's responses, for attaching to a "please support my model" issue. A failed login still produces one. Owner readable only, pruned after 24 hours.
-
-```yaml
-action: zte_tracker.export_support_bundle
-data:
-  acknowledge_sensitive_data: true   # required
-  host: 192.168.1.1                  # optional, one router instead of all
-```
-
-| Summary field | Meaning |
-|---------------|---------|
-| `best_matching_profile` | The profile your router answered. Usually supportable as an alias of it |
-| `tied_profiles` | Profiles sharing every endpoint, so probing cannot separate them |
-| `nodes_not_understood` | Data your firmware returns that no parser reads yet |
-| `endpoints_answered_empty` | Endpoints that exist and returned no devices |
-
-> [!NOTE]
-> No hostname, SSID, serial, MAC or IP address is collected: only node and field names, record counts, and the shape of each value. Names come from your firmware, so have a look before attaching it.
-
-Diagnostics, from the device page, is the other artifact: shapes and counts for when a **supported** router misbehaves.
-
-## 🕹️ Pause/Resume Tracker
-
-To pause or resume the tracker, use the ZTE Tracker Pause switch in the Home Assistant UI. This is useful when you need to access the router's web interface without interference.
-
-- Entity: `switch.zte_tracker_pause`
-- State: `on` (paused), `off` (running)
-
-## 🧩 Register New Devices
-
-To control whether newly discovered devices are added as `device_tracker` entities, use the ZTE Register New Devices switch.
-
-- Entity: `switch.zte_register_new_devices`
-- State: `on` (new devices will be registered), `off` (only existing tracked devices are updated)
-
-## 👨‍👩‍👧 F680 Parental Control
-
-On the ZTE F680, zte_tracker can expose the router's pre-existing Parental Control entries as switches. The integration does not create or edit rules beyond toggling their existing `Enable` state.
-
-- One switch is created per existing router rule
-- The switch name comes from the rule `Name`
-- The switch state mirrors the router's live `Enable` value
-- `on` means the rule is enabled on the router; whether that allows or blocks Internet depends on how the rule is configured there
-- Configure the rules first in the router UI, then reload the integration if needed to discover newly added entries
-
-## 🌐 Mesh Topology Support
-
-For ZTE mesh networks (e.g. F6600P Controller + H196A Agent), enable **Mesh topology** in the integration options to see all devices across all mesh nodes — not just those connected directly to the controller.
-
-### How it works
-
-- Queries the router's topology endpoint (`topo_lua.lua`) to get the full mesh device list
-- Enriches topology data with SSID names from legacy WiFi endpoints
-- Agent WiFi devices inherit the SSID from controller devices with matching frequency band (2.4G → IoT SSID, 5G → Main SSID)
-- Exposes `mesh_node` attribute on each device tracker entity showing which mesh node it connects through
-- Falls back to legacy LAN+WiFi endpoints if topology is unavailable
-- Circuit breaker disables topology after 3 consecutive failures (auto-resets after 5 min)
-
-### Enable
-
-1. **Settings** → **Devices & Services** → **ZTE Router** → **Configure**
-2. Check **Mesh topology**
-3. Click **Submit**
-
-### Requirements
-
-- ZTE mesh setup (controller + one or more mesh agents)
-- Only verified on F6640/F6600P family; other models may not have the topology endpoint
-
-## 🔧 Compatible Routers
-
-| Router Model  | Model Parameter | Verified |
-| ------------- | :-------------: | :------: |
-| ZTE F6640     |      F6640      |    ✅    |
-| ZTE F6645P    |     F6645P      |    ✅    |
-| ZTE F680    |      F680      |    ✅    |
-| ZTE F6745Q  |     F6745Q      |    ✅    |
-| ZTE F6600P  |     F6600P      |    ✅    |
-| ZTE F8748   |      F8748      |    ✅    |
-| ZTE G5B       |       G5B       |    ✅    |
-| ZTE H168A V2.1 |     H168A      |    ✅    |
-| ZTE H169A     |      H169A      |    ✅    |
-| ZTE H2640     |      H2640      |    ✅    |
-| ZTE H288A     |      H288A      |    ✅    |
-| ZTE H388X     |      H388X      |    ✅    |
-| ZTE H3600P    |     H3600P      |    ✅    |
-| ZTE H3640 V10 |      H3640      |    ✅    |
-| ZTE H6645P V2 |     H6645P      |    ✅    |
-| ZTE H6745 V3  |      H6745      |    ✅    |
-| ZTE AX3000    |      E2631      |    ✅    |
-| ZTE SR7410 (ZTE BE7200 Pro+)   |      SR7410      |    ✅    |
-
-> **Note**: This integration may work with additional ZTE router models. Try one of the above parameter values to test compatibility.
-
-> **Not listed?** Try each value above first, then run [`zte_tracker.export_support_bundle`](#zte_trackerexport_support_bundle) and attach the file to an issue.
-
-> **F8748 note**: Verified on a unit provided by **DIGI Portugal** (firmware `V3.0.10P2N4`, hardware `V3.0.03`). It shares the F6640 web-console endpoints, and is defined as a distinct model because this firmware additionally exposes **WAN traffic counters** in `wan_internetstatus_lua.lua`. When the model is `F8748`, the integration parses those into extra router-status attributes: `WAN_rx_bytes`, `WAN_tx_bytes`, `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors`. This is gated to `F8748` so other F6640-family routers are unaffected (we could not confirm they populate the same fields). DIGI units in other countries (e.g. Spain, Romania) are likely identical; F8748 units from other providers or bought retail may expose additional pages/data we could not confirm.
-
-## 🚀 Installation
-
-### Via HACS (Recommended)
-
-1. Open HACS in your Home Assistant instance
-2. Go to "Integrations"
-3. Search for "ZTE Tracker"
-4. Click "Download"
-5. Restart Home Assistant
-
-### Manual Installation
-
-1. Download the latest release from [GitHub Releases](https://github.com/juacas/zte_tracker/releases)
-2. Extract the `zte_tracker` folder to your `custom_components` directory
-3. Restart Home Assistant
-
-## ⚙️ Configuration
-
-### UI Configuration (Recommended)
-
-1. Go to **Settings** → **Devices & Services**
-2. Click **Add Integration**
-3. Search for "ZTE Tracker"
-4. Enter your router details:
-   - **Host**: Router IP address (usually `192.168.1.1` or `192.168.0.1`)
-   - **Username**: Router admin username (usually `admin`)
-   - **Password**: Router admin password
-   - **Model**: Select your router model from the dropdown
-
-### Legacy YAML Configuration (Deprecated)
-
-```yaml
-# This method is deprecated - please use UI configuration instead
-zte_tracker:
-  host: 192.168.1.1
-  model: F6640
-  username: admin
-  password: !secret zte_password
-```
-## Add to your dashboard
-
-### With auto-entities card
-To automatically display all connected devices on your dashboard, you can use the [auto-entities](https://github.com/thomasloven/lovelace-auto-entities) card.
-
-```yaml
-type: custom:auto-entities
-filter:
-  include:
-    - entity_id: device_tracker.zte_*
-sort: name
-card:
-  type: entities
-  title: ZTE Connected Devices
-```
-
-### Display with auto-entities card and flex-table card
-
-```yaml
-type: custom:auto-entities
-filter:
-  include:
-    - options: {}
-      domain: device_tracker
-      state: home
-card:
-  type: custom:flex-table-card
-  title: ZTE-Tracked Devices
-  clickable: true
-  sort_by: connect_time
-  columns:
-    - data: icon
-      name: Type
-    - data: network_type
-      name: Net
-    - data: state
-      name: State
-    - data: host_name
-      name: Host
-    - data: mac
-      name: MAC
-    - data: port
-      name: At
-    - data: last_seen
-      name: Seen
-      fmt: hours_mins_passed
-    - data: connect_time
-      name: Conn
-```
-
-## 🔍 Advanced Configuration
-
-### Adaptive Polling
-
-The integration automatically adjusts polling intervals based on network activity:
-
-- **Fast polling** (30s): When device states are changing frequently
-- **Normal polling** (60s): Default interval for stable networks
-- **Slow polling** (120s): When the network has been stable for extended periods
-
-### Poll Interval
-
-In the integration options, **Refresh speed → Poll interval** is *Adaptive balanced* by default (behaviour above). *Adaptive fast* uses the same logic with 10/30/60 s steps, so changes are noticed sooner but the router is polled more often. *Adaptive relaxed* uses 60/120/300 s steps to put less load on the router.
-
-### Refresh When a Device Joins (off by default)
-
-Enable **Refresh when a device joins the network** to poll right after a device that the router does not list as active announces itself on the LAN. This shortens the time to see a device arrive from up to a minute to a few seconds.
-
-- Joins are heard as ARP frames through a Linux packet socket, so devices with a static IP are caught too.
-- Home Assistant must be on the same network as the devices (not across VLANs, and not with Wi-Fi client isolation) and have raw-socket access (default on Home Assistant OS; a container needs host networking and `NET_RAW`). If the listener cannot start, a warning is logged and polling continues unchanged.
-- Traffic from devices that are already active never triggers a poll. A MAC the router still does not list after two checks is ignored for an hour.
-- Alternative that works anywhere: call the `zte_tracker.refresh` service from an automation.
-- A device leaving is still found by polling.
-
-### Device Persistence
-
-Devices are intelligently cached and persist across:
-
-- Temporary network disconnections
-- Router reboots
-- Integration restarts
-- Home Assistant restarts
-
-This ensures your automations continue working even during brief connectivity issues.
-
-## 🛠️ Troubleshooting
-
-### Common Issues
-
-**"Cannot connect to router"**
-
-- Verify the IP address is correct
-- Check that the username/password are valid
-- Ensure the router's web interface is accessible
-- Try accessing the router's web interface manually first
-
-**"Device not showing as home"**
-
-- Check if the device is connected to WiFi or LAN
-- Verify the device has an active IP address
-- Wait for the next scan cycle (30-120 seconds)
-
-**"Router becomes unresponsive"**
-
-- Use the pause service before accessing the router's web interface
-- Reduce polling frequency if the router is resource-constrained
-- Consider upgrading router firmware if available
-
-### Debug Logging
-
-Enable debug logging to troubleshoot issues:
+Track the devices on your ZTE router and manage the router from Home Assistant.
+
+## Features
+
+- Presence tracking of WiFi and LAN devices, with SSID, network type and last seen time
+- Mesh support: devices on controller and agent nodes, with a `mesh_node` attribute
+- Known devices stay in the registry and come back after a restart, names fall back to cached ones
+- Router sensors: connected devices, status, WAN, DSL and GPON details, firmware, CPU and memory, cellular signal (G5B)
+- Reboot button, pause switch, register-new-devices switch, parental control switches (F680)
+- Adaptive polling with presets, optional refresh the moment a device joins the network
+- Support bundle and diagnostics to get a new model supported
+- UI setup and options, installable with HACS
+
+## Supported routers
+
+| Router Model                 | Model Parameter |     Verified     |
+| ---------------------------- | :-------------: | :--------------: |
+| ZTE F6640                    |      F6640      |        ✅        |
+| ZTE F6645P                   |     F6645P      |        ✅        |
+| ZTE F680                     |      F680       |        ✅        |
+| ZTE F6745Q                   |     F6745Q      |        ✅        |
+| ZTE F6600P                   |     F6600P      |        ✅        |
+| ZTE F8748                    |      F8748      |        ✅        |
+| ZTE G5B                      |       G5B       |        ✅        |
+| ZTE H168A V2.1               |      H168A      |        ✅        |
+| ZTE H169A                    |      H169A      |        ✅        |
+| ZTE H2640                    |      H2640      |        ✅        |
+| ZTE H288A                    |      H288A      |        ✅        |
+| ZTE H388X                    |      H388X      |        ✅        |
+| ZTE H3600P                   |     H3600P      |        ✅        |
+| ZTE H3640 V10                |      H3640      |        ✅        |
+| ZTE H6645P V2                |     H6645P      |        ✅        |
+| ZTE H6745 V3                 |      H6745      |        ✅        |
+| ZTE AX3000                   |      E2631      |        ✅        |
+| ZTE SR7110                   |     SR7110      | alias of E2631   |
+| ZTE SR7410 (ZTE BE7200 Pro+) |     SR7410      |        ✅        |
+
+**Not listed?** It may still work: try each parameter value above. If not, run [`zte_tracker.export_support_bundle`](https://github.com/juacas/zte_tracker/blob/master/docs/services.md#zte_trackerexport_support_bundle) and attach the file to a [new model issue](https://github.com/juacas/zte_tracker/issues/new/choose). More in [Reverse-engineering](https://github.com/juacas/zte_tracker/blob/master/docs/reverse-engineering.md).
+
+**F8748**: verified on a DIGI Portugal unit (firmware `V3.0.10P2N4`). It shares the F6640 endpoints but is a separate model because this firmware also exposes WAN traffic counters (`WAN_rx_bytes`, `WAN_tx_bytes`, `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors`). They are parsed only for `F8748`, other F6640-family routers are unaffected. DIGI units in other countries are likely identical, other F8748 units may expose more data we could not confirm.
+
+## Installation
+
+HACS (recommended): open HACS, search for **ZTE Tracker**, click **Download**, restart Home Assistant.
+
+Manual: download the latest [release](https://github.com/juacas/zte_tracker/releases), copy the `zte_tracker` folder to `custom_components`, restart Home Assistant.
+
+## Setup
+
+1. **Settings -> Devices & Services -> Add Integration -> ZTE Tracker**
+2. Enter **Host** (usually `192.168.1.1`), **Username** (usually `admin`), **Password** and the **Model** from the table above. The form also offers the optional extra queries and session reuse, see [Configuration](https://github.com/juacas/zte_tracker/blob/master/docs/configuration.md#options).
+
+YAML configuration is not supported. If you still have `zte_tracker:` or a `zte_tracker` device tracker in `configuration.yaml`, remove it and add the integration as above. See [MIGRATION.md](https://github.com/juacas/zte_tracker/blob/master/MIGRATION.md).
+
+All options (extra queries, polling, mesh, refresh on join) are in [Configuration](https://github.com/juacas/zte_tracker/blob/master/docs/configuration.md).
+
+## Entities
+
+| Entity | Example id |
+|--------|------------|
+| Router status sensor | `sensor.zte_router_192_168_1_1` |
+| Connected devices sensor | `sensor.zte_router_192_168_1_1_connected_devices` |
+| Cellular sensors (G5B) | `sensor.zte_router_192_168_1_1_lte_rsrp` |
+| Device tracker, one per device | `device_tracker.phone` |
+| Pause switch | `switch.zte_tracker_pause` |
+| Register new devices switch | `switch.zte_register_new_devices` |
+| Parental control switches (F680) | named `<rule> Parental Control` |
+| Reboot button | `button.zte_router_192_168_1_1_reboot` |
+
+All attributes are listed in [Entities](https://github.com/juacas/zte_tracker/blob/master/docs/entities.md). Dashboard examples are in [Dashboards](https://github.com/juacas/zte_tracker/blob/master/docs/dashboards.md).
+
+## Services
+
+| Service | What it does |
+|---------|--------------|
+| `zte_tracker.reboot` | Reboots the router (supported by most models) |
+| `zte_tracker.refresh` | Polls the router now, at most once every 10 s |
+| `zte_tracker.remove_tracked_entity` | Removes a device entity by MAC address |
+| `zte_tracker.remove_unidentified_entities` | Removes device trackers without a unique ID |
+| `zte_tracker.export_support_bundle` | Writes a structure-only JSON file of the router's responses for a support request |
+
+Details and examples in [Services](https://github.com/juacas/zte_tracker/blob/master/docs/services.md).
+
+## Troubleshooting
+
+Enable debug logging:
 
 ```yaml
 logger:
-  default: info
+  default: warning
   logs:
     custom_components.zte_tracker: debug
 ```
 
-## 🔄 Migration from Legacy Versions
+Common problems and sample logs are in [Troubleshooting](https://github.com/juacas/zte_tracker/blob/master/docs/troubleshooting.md).
 
-The integration automatically detects and supports legacy YAML configurations while providing migration prompts. To migrate:
+## Contributing
 
-1. Remove the YAML configuration from `configuration.yaml`
-2. Add the integration through the UI (Settings → Devices & Services)
-3. Use the same credentials and settings
-
-Your existing device trackers and automations will continue working without changes.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
-
-### Development Setup
+Fork, create a branch, add tests, open a pull request. To run the tests:
 
 ```bash
-# Clone the repository
 git clone https://github.com/juacas/zte_tracker.git
-
-# Install development dependencies
-pip install -r requirements_dev.txt
-
-# Run tests
-pytest custom_components/zte_tracker/tests/
+cd zte_tracker
+pip install -r tests/requirements_test.txt
+python -m pytest tests/
 ```
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **@juacas** for original development and ongoing maintenance
 - **@lebdim** for major contributions and project stewardship from v2.1.0 upwards
+- **@cagnulein** for requesting the WAN status attributes
 - **@Ices-Eyes** for fixing unconnected devices issue #72
 - **@gselivanof** for H288A, H169A models support
 - **@TrinTragula** for H388X verification
@@ -435,184 +145,10 @@ pytest custom_components/zte_tracker/tests/
 - **@gradypark86** for SR7410 verification
 - **@LeMehdi0** for F6745Q support bundle (#106)
 - **@enisyugnak** for H168A support bundle (#112)
+- **@olaldiko** for G5B support (#130)
 
+## License
 
-## 📄 License
+GNU General Public License v3.0, see [LICENSE](https://github.com/juacas/zte_tracker/blob/master/LICENSE).
 
-This project is licensed under the GNU License - see the [LICENSE](LICENSE) file for details.
-
-## 🔗 Links
-
-- [GitHub Repository](https://github.com/juacas/zte_tracker)
-- [Home Assistant Community](https://community.home-assistant.io/)
-- [Issue Tracker](https://github.com/juacas/zte_tracker/issues)
-- [Latest Release](https://github.com/juacas/zte_tracker/releases/latest)
-
-<a id="reverse-engineering-the-router-web-console"></a>
-
-## 🕵️‍♂️ Reverse-Engineering the Router Web Console
-
-If your ZTE router model is not listed above or you want to extend integration support, you can reverse-engineer the router's web console to discover how it exposes device and status information.
-
-### Steps to Reverse-Engineer
-
-1. **Access the Router Web Console**
-   Open your browser and log in to your router's web interface (usually at `http://192.168.1.1`).
-
-2. **Open Developer Tools**
-   Press <kbd>F12</kbd> or right-click and select "Inspect" to open your browser's developer tools.
-
-3. **Monitor Network Requests**
-   Go to the "Network" tab and look for requests made when you view device lists, status pages, or perform actions (like reboot).
-
-4. **Identify API Endpoints**
-   Filter by `XHR` or `Fetch` requests. Look for URLs ending in `.lua`, `.cgi`, or similar, and inspect the request/response payloads.
-
-5. **Analyze Data Formats**
-   ZTE routers typically return data in XML or JSON. Copy the response and note the structure—especially device lists, status fields, and control commands.
-
-6. **Test Requests Manually**
-   Use tools like Developer Tools (Replay XHR), [Postman](https://www.postman.com/) or `curl` to replicate requests outside the browser.
-   Example:
-
-   ```bash
-   curl -k "https://192.168.1.1/?_type=menuData&_tag=wlan_client_stat_lua.lua"
-   ```
-
-7. **Document Parameters**
-   Note required headers, authentication methods, and any session tokens.
-
-8. **Map Data to Integration**
-   Match fields like MAC address, IP, hostname, connection type, and status to the integration's expected format.
-
-9. **Check Login Mechanism**
-   To be sure that current login implementation is valid, enable debug for the integration and look for login errors.
-   To enable debug, edit `configuration.yaml` and set `logger` to `debug` level for the integration by adding:
-
-```yaml
-logger:
-  default: warning
-  logs:
-    custom_components.zte_tracker: debug
-    custom_components.zte_tracker.zteclient.zte_client: debug
-```
-
-For login-related errors or warnings, enable and inspect debug logs as described in the "Before reverse-engineering understand and check debug logs" section: [Before reverse-engineering understand and check debug logs](#before-reverse-engineering-understand-and-check-debug-logs)
-
-### Example: Sequences of URLs
-
-Below are the actual URL sequences used by the integration for the most common ZTE router models:
-
-#### **F6640 / F6645P**
-
-- **Login Sequence:**
-
-  1. `GET  https://[router_ip]/?_type=loginData&_tag=login_entry`
-  2. `GET  https://[router_ip]/?_type=loginData&_tag=login_token&_=[guid]`
-  3. `POST https://[router_ip]/?_type=loginData&_tag=login_entry` (with hashed password and session token)
-
-- **Get WiFi Devices:**
-
-  1. `GET  https://[router_ip]/?_type=menuView&_tag=localNetStatus&_=[guid]`
-  2. `GET  https://[router_ip]/?_type=menuData&_tag=wlan_client_stat_lua.lua&_=[guid]`
-
-- **Get LAN Devices:**
-
-  1. `GET  https://[router_ip]/?_type=menuView&_tag=localNetStatus&_=[guid]`
-  2. `GET  https://[router_ip]/?_type=menuData&_tag=accessdev_landevs_lua.lua&_=[guid]`
-
-- **Get Router Details:**
-
-  1. `GET  https://[router_ip]/?_type=menuView&_tag=statusMgr&Menu3Location=0&_=[guid]`
-  2. `GET  https://[router_ip]/?_type=menuData&_tag=devmgr_statusmgr_lua.lua&_=[guid]`
-
-- **Get WAN Status:**
-
-  1. `GET  https://[router_ip]/?_type=menuView&_tag=ethWanStatus&Menu3Location=0&_=[guid]`
-  2. `GET  https://[router_ip]/?_type=menuData&_tag=wan_internetstatus_lua.lua&TypeUplink=2&pageType=1&_=[guid]`
-
-- **Reboot Router:**
-  1. `GET  https://[router_ip]/?_type=menuView&_tag=rebootAndReset&Menu3Location=0&_=[guid]`
-  2. `POST https://[router_ip]/?_type=menuData&_tag=devmgr_restartmgr_lua.lua&_=[guid]` (with encrypted digest and session token)
-
-#### **H288A / H169A / H168A / H388X / H2640 / H3600P / H6645P / H3640**
-
-- **WiFi Devices:**
-  `GET https://[router_ip]/?_type=menuData&_tag=accessdev_ssiddev_lua.lua&_=[guid]`
-- **LAN Devices:**
-  `GET https://[router_ip]/?_type=menuData&_tag=accessdev_landevs_lua.lua&_=[guid]`
-
-#### **E2631**
-
-- **WiFi Devices:**
-  `GET https://[router_ip]/?_type=vueData&_tag=vue_client_data&_=[guid]`
-- **LAN Devices:**
-  `GET https://[router_ip]/?_type=vueData&_tag=localnet_lan_info_lua&_=[guid]`
-
-> Replace `[router_ip]` with your router's IP (e.g., `192.168.1.1`).
-> `[guid]` is a unique number generated for each request.
-
-### Example XML Response (F6640 Device List)
-
-```xml
-<ajax_response_xml_root>
-  <OBJ_WLAN_AD_ID>
-    <Instance>
-      <ParaName>MACAddress</ParaName>
-      <ParaValue>58:e4:03:f2:7b:f2</ParaValue>
-      ...
-    </Instance>
-    ...
-  </OBJ_WLAN_AD_ID>
-</ajax_response_xml_root>
-```
-
-<a id="before-reverse-engineering-understand-and-check-debug-logs"></a>
-
-### Before reverse-engineering understand and check debug logs
-
-Before begining to reverse engineering check what extent id zte_tracker working with your router.
-First, check is it is able to login into the router.
-Second, check if it is able to retrieve device lists.
-
-To enable debug logging for the integration, edit `configuration.yaml` and set `logger` to `debug` level for the integration by adding:
-
-```yaml
-logger:
-  default: warning
-  logs:
-    custom_components.zte_tracker: debug
-    custom_components.zte_tracker.zteclient.zte_client: debug
-```
-
-Look for any errors or warnings related to login attempts. Example:
-
-Typical successful login sequence:
-```
-2025-09-01 08:27:18.699 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=loginData&_tag=login_entry Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:18.873 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=loginData&_tag=login_token&_=[guid] Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:19.053 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=loginData&_tag=login_entry Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:19.054 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Login refresh required
-```
-
-Typical successful retrieval of devices:
-```
-2025-09-01 08:27:19.294 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=menuView&_tag=localNetStatus&_=GUID Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:19.507 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=menuData&_tag=accessdev_landevs_lua.lua&_GUID Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:19.507 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Found 21 device instances in XML
-2025-09-01 08:27:19.508 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Parsed 21 valid devices
-2025-09-01 08:27:19.782 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=menuData&_tag=wlan_client_stat_lua.lua&_=GUID Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:19.784 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Found 18 device instances in XML
-2025-09-01 08:27:19.784 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Parsed 18 valid devices
-2025-09-01 08:27:20.209 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=menuData&_tag=wan_internetstatus_lua.lua&TypeUplink=2&pageType=1&_=GUID Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:20.435 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=menuView&_tag=statusMgr&Menu3Location=0&_=GUID Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:20.645 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=menuData&_tag=devmgr_statusmgr_lua.lua&_=GUID Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-```
-Typical successful logout sequence:
-```
-2025-09-01 08:27:20.852 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Request 200 URL: https://ROUTER_IP/?_type=loginData&_tag=logout_entry Headers: {..., 'Cookie': 'SID_HTTPS_=ANON_COOKIE'}
-2025-09-01 08:27:20.852 DEBUG (SyncWorker_1) [custom_components.zte_tracker.zteclient.zte_client] Logged out successfully
-2025-09-01 08:27:20.854 DEBUG (MainThread) [custom_components.zte_tracker.coordinator] Adjusting update interval from 0:00:30 to 0:01:00 (stable count: 2)
-2025-09-01 08:27:20.854 DEBUG (MainThread) [custom_components.zte_tracker.coordinator] Finished fetching zte_tracker data in 2.355 seconds (success: True)
-2025-09-01 08:27:33.690 INFO (MainThread) [custom_components.zte_tracker] No unidentified device_tracker entities found to remove.
-```
+[GitHub](https://github.com/juacas/zte_tracker) | [Issues](https://github.com/juacas/zte_tracker/issues) | [Latest release](https://github.com/juacas/zte_tracker/releases/latest) | [Home Assistant Community](https://community.home-assistant.io/)

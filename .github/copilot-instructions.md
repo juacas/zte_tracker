@@ -133,11 +133,18 @@ black custom_components/zte_tracker/
 
 ```
 .
-├── README.md                           # Installation and usage instructions
+├── README.md                           # Short overview, shipped with the HACS release
+├── docs/                               # Entities, configuration, services, troubleshooting, reverse-engineering
+├── MIGRATION.md                        # Moving from the YAML version
 ├── custom_components/zte_tracker/      # Main integration code
 │   ├── __init__.py                     # Integration setup and services
 │   ├── device_tracker.py               # Device tracking implementation
 │   ├── sensor.py                       # Status sensors
+│   ├── switch.py                       # Pause, register-new-devices, parental control
+│   ├── button.py                       # Reboot button
+│   ├── arp_watcher.py                  # Refresh on device join
+│   ├── live_refresh.py                 # Join refresh wiring
+│   ├── legacy_device_tracker.py        # Legacy DeviceScanner, kept for backward compatibility
 │   ├── const.py                        # Constants and configuration
 │   ├── coordinator.py                  # Polling, session and device cache
 │   ├── config_flow.py                  # UI setup and options
@@ -147,11 +154,11 @@ black custom_components/zte_tracker/
 │   ├── manifest.json                   # Integration metadata
 │   ├── services.yaml                   # Service definitions
 │   ├── strings.json                    # UI strings
-│   ├── tests/                          # Integration tests
 │   └── zteclient/                      # ZTE router client library
 │       ├── zte_client.py               # Main client implementation
-│       ├── tests/                      # Client tests
-│       └── README.md                   # Client documentation
+│       ├── routers/                    # Raw router response notes
+│       └── README.md                   # Raw client notes
+├── tests/                              # All tests (pytest and standalone unittest)
 ├── .devcontainer/                      # VS Code devcontainer setup
 ├── .github/workflows/                  # CI/CD workflows
 └── hacs.json                          # HACS integration metadata
@@ -159,7 +166,7 @@ black custom_components/zte_tracker/
 
 ### Supported Router Models
 
-See the table in README.md, which is the list that is kept current.
+See the table in README.md (and `_MODELS` in `zte_client.py`), which is the list that is kept current.
 
 ### Key Configuration
 
@@ -215,16 +222,21 @@ If the devcontainer fails to start:
 
 ### Test Issues
 
-The suites under `custom_components/zte_tracker/tests/` and `zteclient/tests/` load their targets with importlib, so they run without Home Assistant installed:
+Run the full suite the way CI does (Python 3.13, needs Home Assistant):
 
 ```bash
-cd custom_components/zte_tracker/tests
-python3 -m unittest test_support_bundle test_service_layer test_diagnostics
-python3 -m unittest test_support_shape_fuzz   # ZTE_FUZZ_ITERATIONS to raise the count
-cd ../zteclient/tests && python3 -m unittest test_router_details_parsing
+pip install -r tests/requirements_test.txt
+python -m pytest tests/
 ```
 
-The older suites in the same folders still import Home Assistant and pytest, and cannot be run that way. The Tests workflow runs the standalone ones on every push.
+The suites loaded with importlib run without Home Assistant, and the Tests workflow also runs them through `.github/scripts/run_release_tests.sh`:
+
+```bash
+cd tests
+python3 -m unittest test_support_bundle test_service_layer test_diagnostics
+python3 -m unittest test_support_shape_fuzz   # ZTE_FUZZ_ITERATIONS to raise the count
+cd zteclient && python3 -m unittest test_router_details_parsing test_wan_status test_json_responses
+```
 
 ## Router data formats
 
