@@ -134,6 +134,15 @@ _MODELS["F6600P"] = {
     "tag_pon_optical_data": "optical_info_lua.lua",
 }
 _MODELS["F6745Q"] = _MODELS["F6600P"]
+# H6745 V3 (Open Fiber / Italian firmware V3.0.0P9_IT). Same LAN/WLAN scripts
+# as H288A, but the WAN status page is ethSfpWanStatus (ethWanStatus does not
+# exist on this firmware) and wan_internet_lua.lua returns several instances,
+# none named WAN_internet.
+_MODELS["H6745V3"] = {
+    **_MODELS["H288A"],
+    "tag_wan_status_view": "ethSfpWanStatus&Menu3Location=0",
+    "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1",
+}
 # Distinct model, not a plain F6640 alias: only confirmed F680 units expose
 # parental-control data in firewall_parentctrl_lua.lua, so probing and switch
 # creation stay opt-in per model.
@@ -872,6 +881,11 @@ class zteClient:
                 wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
+                if "SessionTimeout" in r.text:
+                    # HTTP 200 with a SessionTimeout error body means the view
+                    # was not advertised in this session; treat it as a failure
+                    # so the localNetStatus fallback below runs.
+                    raise RuntimeError("WLAN view not advertised; falling back")
             except Exception:
                 # Fallback to full setup if direct request fails
                 r = self.session.get(
@@ -1841,6 +1855,15 @@ class zteClient:
                         break
                 if wan_node is not None:  # truth-testing an Element is deprecated
                     break
+            if wan_node is None and instances:
+                # No instance is named WAN_internet on this firmware; prefer the
+                # one whose ConnStatus is Connected (the PPPoE instance) over
+                # instances[0], which can be a DHCP instance stuck in Connecting.
+                for inst in instances:
+                    kv = {inst[i * 2].text: inst[i * 2 + 1].text for i in range(len(inst) // 2)}
+                    if kv.get("ConnStatus") == "Connected":
+                        wan_node = inst
+                        break
             if wan_node is None and instances:
                 wan_node = instances[0]
             if wan_node is not None:  # truth-testing an Element is deprecated
