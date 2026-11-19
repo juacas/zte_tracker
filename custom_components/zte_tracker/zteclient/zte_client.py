@@ -884,10 +884,13 @@ class zteClient:
                 wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
-                if "SessionTimeout" in r.text:
-                    # HTTP 200 with a SessionTimeout error body means the view
-                    # was not advertised in this session; treat it as a failure
-                    # so the localNetStatus fallback below runs.
+                if self._parse_response(r.text).findtext("IF_ERRORSTR") == "SessionTimeout":
+                    # HTTP 200 with a SessionTimeout error body means the
+                    # WLAN tag was not advertised by a view in this session.
+                    # Compare the parsed IF_ERRORSTR, not a substring of the
+                    # whole body, so a hostname like "SessionTimeout-pc" is
+                    # not mistaken for an error. Treat it as a failure so the
+                    # localNetStatus fallback below runs.
                     raise RuntimeError("WLAN view not advertised; falling back")
             except Exception as exc:
                 # Fallback to full setup if direct request fails
@@ -905,10 +908,6 @@ class zteClient:
                 wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
-                if "SessionTimeout" in r.text:
-                    # The fallback view did not advertise the WLAN data
-                    # either; surface it instead of parsing an error body.
-                    raise RuntimeError("WLAN data unavailable after fallback")
 
             self.log_request(r)
             devices = self.parse_devices(r.text, self.paths["wlan_id_element"], "WLAN")

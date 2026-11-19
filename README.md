@@ -62,7 +62,7 @@ Track the devices on your ZTE router and manage the router from Home Assistant.
 
 **F8748**: verified on a DIGI Portugal unit (firmware `V3.0.10P2N4`). It shares the F6640 endpoints but is a separate model because this firmware also exposes WAN traffic counters (`WAN_rx_bytes`, `WAN_tx_bytes`, `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors`). They are parsed only for `F8748`, other F6640-family routers are unaffected. DIGI units in other countries are likely identical, other F8748 units may expose more data we could not confirm.
 
-**H6745 V3 (Open Fiber, `V3.0.0P9_IT`)**: this Italian Open Fiber firmware needs the `H6745V3` parameter, not `H6745`. On it the WAN page is `ethSfpWanStatus` (not `ethWanStatus`), and both the WiFi and WAN queries need a `SessionTimeout` fallback (#128). If you already added an H6745 V3 on this firmware with the `H6745` parameter, remove the integration and add it again with `H6745V3`.
+**H6745 V3 (Open Fiber, `V3.0.0P9_IT`)**: this Italian Open Fiber firmware needs the `H6745V3` parameter, not `H6745`. On it the WAN page is `ethSfpWanStatus` (not `ethWanStatus`), and the WiFi query needs a `SessionTimeout` fallback (#128). If you already added an H6745 V3 on this firmware with the `H6745` parameter, remove the integration and add it again with `H6745V3`.
 
 ## Installation
 

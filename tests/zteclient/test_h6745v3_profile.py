@@ -65,6 +65,19 @@ WLAN_DEVICES = """<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR>
     </Instance>
   </OBJ_ACCESSDEV_ID></ajax_response_xml_root>"""
 
+# A real client whose hostname contains the word SessionTimeout must not be
+# mistaken for the SessionTimeout error body (IF_ERRORSTR is SUCC here).
+WLAN_DEVICES_TIMEOUT_HOSTNAME = """<ajax_response_xml_root><IF_ERRORSTR>SUCC</IF_ERRORSTR>
+  <OBJ_ACCESSDEV_ID>
+    <Instance>
+      <ParaName>HostName</ParaName><ParaValue>SessionTimeout-pc</ParaValue>
+      <ParaName>IPAddress</ParaName><ParaValue>192.168.1.20</ParaValue>
+      <ParaName>Active</ParaName><ParaValue>1</ParaValue>
+      <ParaName>MACAddress</ParaName><ParaValue>aa:bb:cc:dd:ee:09</ParaValue>
+      <ParaName>AliasName</ParaName><ParaValue>SSID1</ParaValue>
+    </Instance>
+  </OBJ_ACCESSDEV_ID></ajax_response_xml_root>"""
+
 TIMEOUT = (
     "<ajax_response_xml_root><IF_ERRORSTR>SessionTimeout</IF_ERRORSTR>"
     "</ajax_response_xml_root>"
@@ -163,3 +176,14 @@ class TestH6745V3Profile(TestCase):
         ]
 
         self.assertIsNone(client.get_wifi_devices())
+
+    def test_hostname_containing_sessiontimeout_is_not_an_error(self):
+        """A direct WLAN response with IF_ERRORSTR=SUCC is used as-is, even if a
+        hostname contains the word SessionTimeout; no fallback, device returned."""
+        client = self._client("H6745V3")
+        client.session.get.side_effect = [_response(WLAN_DEVICES_TIMEOUT_HOSTNAME)]
+
+        devices = client.get_wifi_devices()
+
+        self.assertEqual(client.session.get.call_count, 1)
+        self.assertEqual([d["MACAddress"] for d in devices], ["AA:BB:CC:DD:EE:09"])
