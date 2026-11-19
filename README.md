@@ -53,6 +53,7 @@ Track the devices on your ZTE router and manage the router from Home Assistant.
 | ZTE H3640 V10                |      H3640      |        ✅        |
 | ZTE H6645P V2                |     H6645P      |        ✅        |
 | ZTE H6745 V3                 |      H6745      |        ✅        |
+| ZTE H6745 V3 (Open Fiber)    |     H6745V3     |        ✅        |
 | ZTE AX3000                   |      E2631      |        ✅        |
 | ZTE SR7110                   |     SR7110      | alias of E2631   |
 | ZTE SR7410 (ZTE BE7200 Pro+) |     SR7410      |        ✅        |
@@ -60,6 +61,8 @@ Track the devices on your ZTE router and manage the router from Home Assistant.
 **Not listed?** It may still work: try each parameter value above. If not, run [`zte_tracker.export_support_bundle`](https://github.com/juacas/zte_tracker/blob/master/docs/services.md#zte_trackerexport_support_bundle) and attach the file to a [new model issue](https://github.com/juacas/zte_tracker/issues/new/choose). More in [Reverse-engineering](https://github.com/juacas/zte_tracker/blob/master/docs/reverse-engineering.md).
 
 **F8748**: verified on a DIGI Portugal unit (firmware `V3.0.10P2N4`). It shares the F6640 endpoints but is a separate model because this firmware also exposes WAN traffic counters (`WAN_rx_bytes`, `WAN_tx_bytes`, `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors`). They are parsed only for `F8748`, other F6640-family routers are unaffected. DIGI units in other countries are likely identical, other F8748 units may expose more data we could not confirm.
+
+**H6745 V3 (Open Fiber, `V3.0.0P9_IT`)**: this Italian Open Fiber firmware needs the `H6745V3` parameter, not `H6745`. On it the WAN page is `ethSfpWanStatus` (not `ethWanStatus`), and the WiFi query needs a `SessionTimeout` fallback (#128). If you already added an H6745 V3 on this firmware with the `H6745` parameter, remove the integration and add it again with `H6745V3`.
 
 ## Installation
 
@@ -141,6 +144,7 @@ python -m pytest tests/
 - **@lapo** for H6645P verification
 - **@309631** for H3640 verification
 - **@stefanosalatini** for H6745 support bundle (#74)
+- **@ilpincio85** for H6745 V3 (Open Fiber, `V3.0.0P9_IT`) support (#128)
 - **@LZDEROH** for AX3000 verification
 - **@gradypark86** for SR7410 verification
 - **@LeMehdi0** for F6745Q support bundle (#106)

@@ -134,6 +134,19 @@ _MODELS["F6600P"] = {
     "tag_pon_optical_data": "optical_info_lua.lua",
 }
 _MODELS["F6745Q"] = _MODELS["F6600P"]
+# H6745 V3 (Open Fiber / Italian firmware V3.0.0P9_IT). Same LAN/WLAN scripts
+# as H288A, but the WAN status page is ethSfpWanStatus (ethWanStatus does not
+# exist on this firmware) and wan_internet_lua.lua returns several instances,
+# none named WAN_internet.
+_MODELS["H6745V3"] = {
+    **_MODELS["H288A"],
+    "tag_wan_status_view": "ethSfpWanStatus&Menu3Location=0",
+    "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1",
+    # wan_internet_lua.lua returns several instances, none named
+    # WAN_internet, so pick the Connected one. Opt-in per model.
+    "prefer_connected_wan": True,
+    "tag_wan_traffic_data": "eth_sfp_interface_status_lua.lua",
+}
 # Distinct model, not a plain F6640 alias: only confirmed F680 units expose
 # parental-control data in firewall_parentctrl_lua.lua, so probing and switch
 # creation stay opt-in per model.
@@ -872,8 +885,20 @@ class zteClient:
                 wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
-            except Exception:
+                if self._parse_response(r.text).findtext("IF_ERRORSTR") == "SessionTimeout":
+                    # HTTP 200 with a SessionTimeout error body means the
+                    # WLAN tag was not advertised by a view in this session.
+                    # Compare the parsed IF_ERRORSTR, not a substring of the
+                    # whole body, so a hostname like "SessionTimeout-pc" is
+                    # not mistaken for an error. Treat it as a failure so the
+                    # localNetStatus fallback below runs.
+                    raise RuntimeError("WLAN view not advertised; falling back")
+            except Exception as exc:
                 # Fallback to full setup if direct request fails
+                _LOGGER.debug(
+                    "WLAN direct request failed (%s); falling back to localNetStatus view",
+                    exc,
+                )
                 r = self.session.get(
                     f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
                     verify=self.verify_ssl,
@@ -1841,6 +1866,21 @@ class zteClient:
                         break
                 if wan_node is not None:  # truth-testing an Element is deprecated
                     break
+            if (
+                wan_node is None
+                and instances
+                and self.paths.get("prefer_connected_wan")
+            ):
+                # No instance is named WAN_internet on this firmware; prefer the
+                # one whose ConnStatus is Connected (the PPPoE instance) over
+                # instances[0], which can be a DHCP instance stuck in Connecting.
+                # Opt-in per model (prefer_connected_wan), so other models keep
+                # the instances[0] fallback unchanged.
+                for inst in instances:
+                    kv = {inst[i * 2].text: inst[i * 2 + 1].text for i in range(len(inst) // 2)}
+                    if kv.get("ConnStatus") == "Connected":
+                        wan_node = inst
+                        break
             if wan_node is None and instances:
                 wan_node = instances[0]
             if wan_node is not None:  # truth-testing an Element is deprecated
@@ -1887,6 +1927,8 @@ class zteClient:
                             and pv.strip().lstrip("-").isdigit()
                         ):
                             wan_attrs[traffic_map[pn]] = int(pv)
+            if self.paths.get("tag_wan_traffic_data"):
+                wan_attrs.update(self._get_wan_port_traffic())
         except Exception as ex:
             _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
             # Surfaced on the entity, not only in the log, so a failure is diagnosable without an export_support_bundle round-trip (#75).
@@ -1894,6 +1936,53 @@ class zteClient:
         # model-gated no-op elsewhere; see get_pon_optical_info().
         wan_attrs.update(self.get_pon_optical_info())
         return wan_attrs
+
+    def _get_wan_port_traffic(self) -> dict[str, Any]:
+        """Byte/packet counters of the active WAN Ethernet/SFP port.
+
+        On firmwares that set tag_wan_traffic_data (H6745V3) the WAN byte
+        counters live on eth_sfp_interface_status_lua.lua rather than in the
+        WAN connection data. UPnP IGD on this router saturates its 32-bit
+        counters, so these are the only usable source for throughput.
+        """
+        out: dict[str, Any] = {}
+        try:
+            url = (
+                f"{self.base_url}/?_type={self.paths['type_first_request']}"
+                f"&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
+            )
+            self.session.get(url, verify=self.verify_ssl, timeout=10).raise_for_status()
+            url = (
+                f"{self.base_url}/?_type={self.paths['type_main_request']}"
+                f"&_tag={self.paths['tag_wan_traffic_data']}&_={self.get_guid()}"
+            )
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            xml = self._parse_response(r.text)
+            err = xml.findtext("IF_ERRORSTR")
+            if err and err not in ("SUCC", "SUCCESS", "OK"):
+                raise RuntimeError(f"Router error: {err}")
+            ports = [
+                self._parse_instance(i, coerce_numeric=False)
+                for i in xml.iter("Instance")
+            ]
+            port = next((p for p in ports if p.get("Status") == "Up"), None)
+            if port is None:
+                return out
+            field_map = {
+                "BytesReceived": "WAN_rx_bytes",
+                "BytesSent": "WAN_tx_bytes",
+                "PacketsReceived": "WAN_rx_packets",
+                "PacketsSent": "WAN_tx_packets",
+                "LinkSpeed": "WAN_link_speed_mbps",
+            }
+            for key, attr in field_map.items():
+                value = port.get(key)
+                if value is not None and str(value).isdigit():
+                    out[attr] = int(value)
+        except Exception as ex:
+            _LOGGER.debug("WAN port traffic not available: %s", ex)
+        return out
 
     def get_pon_optical_info(self) -> dict[str, Any]:
         """Fetch GPON optical diagnostics. Model-gated: {} unless tag_pon_optical_* is set (F6600P, F6745Q)."""

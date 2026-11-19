@@ -32,9 +32,10 @@ What else is there depends on the model and on the **Query WAN status** and **Qu
 | `WAN_connected` | Internet link is up |
 | `WAN_public_ip`, `WAN_ipv6_ip`, `WAN_gateway`, `WAN_subnet_mask`, `WAN_dns_servers` | Addressing, when the router reports it |
 | `WAN_mode`, `WAN_uptime`, `WAN_remain_leasetime`, `WAN_error_message` | Connection mode, uptime, DHCP lease time left, last error |
-| `WAN_rx_bytes`, `WAN_tx_bytes` | Traffic counters (G5B, F8748) |
+| `WAN_rx_bytes`, `WAN_tx_bytes` | Traffic counters (G5B, F8748, H6745V3) |
 | `WAN_rx_throughput_bps`, `WAN_tx_throughput_bps` | Current throughput (G5B) |
-| `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors` | Traffic counters (F8748) |
+| `WAN_rx_packets`, `WAN_tx_packets`, `WAN_rx_errors`, `WAN_tx_errors` | Traffic counters (F8748; `WAN_rx_packets` / `WAN_tx_packets` also H6745V3) |
+| `WAN_link_speed_mbps` | WAN port link speed in Mbit/s (H6745V3) |
 | `WAN_status_error` | Only present when the WAN query failed: the error text |
 
 ### DSL line
