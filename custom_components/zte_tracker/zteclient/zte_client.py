@@ -142,6 +142,9 @@ _MODELS["H6745V3"] = {
     **_MODELS["H288A"],
     "tag_wan_status_view": "ethSfpWanStatus&Menu3Location=0",
     "tag_wan_status_data": "wan_internet_lua.lua&TypeUplink=2&pageType=1",
+    # wan_internet_lua.lua returns several instances, none named
+    # WAN_internet, so pick the Connected one. Opt-in per model.
+    "prefer_connected_wan": True,
 }
 # Distinct model, not a plain F6640 alias: only confirmed F680 units expose
 # parental-control data in firewall_parentctrl_lua.lua, so probing and switch
@@ -898,6 +901,10 @@ class zteClient:
                 wlan_request = f"{self.base_url}/?_type={self.paths['type_main_request']}&_tag={self.paths['wlan_script']}&_={self.get_guid()}"
                 r = self.session.get(wlan_request, verify=self.verify_ssl, timeout=10)
                 r.raise_for_status()
+                if "SessionTimeout" in r.text:
+                    # The fallback view did not advertise the WLAN data
+                    # either; surface it instead of parsing an error body.
+                    raise RuntimeError("WLAN data unavailable after fallback")
 
             self.log_request(r)
             devices = self.parse_devices(r.text, self.paths["wlan_id_element"], "WLAN")
@@ -1855,10 +1862,16 @@ class zteClient:
                         break
                 if wan_node is not None:  # truth-testing an Element is deprecated
                     break
-            if wan_node is None and instances:
+            if (
+                wan_node is None
+                and instances
+                and self.paths.get("prefer_connected_wan")
+            ):
                 # No instance is named WAN_internet on this firmware; prefer the
                 # one whose ConnStatus is Connected (the PPPoE instance) over
                 # instances[0], which can be a DHCP instance stuck in Connecting.
+                # Opt-in per model (prefer_connected_wan), so other models keep
+                # the instances[0] fallback unchanged.
                 for inst in instances:
                     kv = {inst[i * 2].text: inst[i * 2 + 1].text for i in range(len(inst) // 2)}
                     if kv.get("ConnStatus") == "Connected":
