@@ -35,6 +35,8 @@ FIXED_PROBES: dict[str, tuple[str, str]] = {
     "device_info_view": ("menuView", "statusMgr&Menu3Location=0"),
     "topology": ("menuData", "topo_lua.lua"),
     "lan_view": ("menuView", "localNetStatus"),
+    "wan_sfp_view": ("menuView", "ethSfpWanStatus&Menu3Location=0"),
+    "wan_sfp_traffic": ("menuData", "eth_sfp_interface_status_lua.lua"),
 }
 
 # Node names the parsers already understand.
@@ -50,6 +52,7 @@ KNOWN_NODES = frozenset(
         "OBJ_POWERONTIME_ID",  # get_router_details
         "OBJ_WLANAP_ID",  # parse_devices, ESSID mapping
         "ID_WAN_COMFIG",  # get_wan_status (Ethernet-style WAN models)
+        "OBJ_ETH_ID",  # get_wan_status WAN port traffic counters (H6745V3)
         "OBJ_DSLINTERFACE_ID",  # get_wan_status, DSL branch (H2640)
         "OBJ_PON_OPTICALPARA_ID",  # get_pon_optical_info
         "OBJ_LOS_INFO_ID",  # get_pon_optical_info
