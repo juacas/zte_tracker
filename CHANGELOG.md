@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.3.3
+
+- feat: Add support for ZTE G5B model (#130)
+- docs: compact README, move details to docs/, fix outdated claims (#131)
+- Expose WAN port byte/packet counters (H6745V3) (#133)
+
 ## v2.3.2
 
 - fix(H3640): use wan_internet_lua.lua for WAN status (#120)
