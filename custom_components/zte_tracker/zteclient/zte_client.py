@@ -889,8 +889,12 @@ class zteClient:
                     # was not advertised in this session; treat it as a failure
                     # so the localNetStatus fallback below runs.
                     raise RuntimeError("WLAN view not advertised; falling back")
-            except Exception:
+            except Exception as exc:
                 # Fallback to full setup if direct request fails
+                _LOGGER.debug(
+                    "WLAN direct request failed (%s); falling back to localNetStatus view",
+                    exc,
+                )
                 r = self.session.get(
                     f"{self.base_url}/?_type={self.paths['type_first_request']}&_tag=localNetStatus&_={self.get_guid()}",
                     verify=self.verify_ssl,
