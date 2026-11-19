@@ -145,6 +145,7 @@ _MODELS["H6745V3"] = {
     # wan_internet_lua.lua returns several instances, none named
     # WAN_internet, so pick the Connected one. Opt-in per model.
     "prefer_connected_wan": True,
+    "tag_wan_traffic_data": "eth_sfp_interface_status_lua.lua",
 }
 # Distinct model, not a plain F6640 alias: only confirmed F680 units expose
 # parental-control data in firewall_parentctrl_lua.lua, so probing and switch
@@ -1926,6 +1927,8 @@ class zteClient:
                             and pv.strip().lstrip("-").isdigit()
                         ):
                             wan_attrs[traffic_map[pn]] = int(pv)
+            if self.paths.get("tag_wan_traffic_data"):
+                wan_attrs.update(self._get_wan_port_traffic())
         except Exception as ex:
             _LOGGER.warning(f"Failed to fetch WAN status: {ex}")
             # Surfaced on the entity, not only in the log, so a failure is diagnosable without an export_support_bundle round-trip (#75).
@@ -1933,6 +1936,53 @@ class zteClient:
         # model-gated no-op elsewhere; see get_pon_optical_info().
         wan_attrs.update(self.get_pon_optical_info())
         return wan_attrs
+
+    def _get_wan_port_traffic(self) -> dict[str, Any]:
+        """Byte/packet counters of the active WAN Ethernet/SFP port.
+
+        On firmwares that set tag_wan_traffic_data (H6745V3) the WAN byte
+        counters live on eth_sfp_interface_status_lua.lua rather than in the
+        WAN connection data. UPnP IGD on this router saturates its 32-bit
+        counters, so these are the only usable source for throughput.
+        """
+        out: dict[str, Any] = {}
+        try:
+            url = (
+                f"{self.base_url}/?_type={self.paths['type_first_request']}"
+                f"&_tag={self.paths['tag_wan_status_view']}&_={self.get_guid()}"
+            )
+            self.session.get(url, verify=self.verify_ssl, timeout=10).raise_for_status()
+            url = (
+                f"{self.base_url}/?_type={self.paths['type_main_request']}"
+                f"&_tag={self.paths['tag_wan_traffic_data']}&_={self.get_guid()}"
+            )
+            r = self.session.get(url, verify=self.verify_ssl, timeout=10)
+            r.raise_for_status()
+            xml = self._parse_response(r.text)
+            err = xml.findtext("IF_ERRORSTR")
+            if err and err not in ("SUCC", "SUCCESS", "OK"):
+                raise RuntimeError(f"Router error: {err}")
+            ports = [
+                self._parse_instance(i, coerce_numeric=False)
+                for i in xml.iter("Instance")
+            ]
+            port = next((p for p in ports if p.get("Status") == "Up"), None)
+            if port is None:
+                return out
+            field_map = {
+                "BytesReceived": "WAN_rx_bytes",
+                "BytesSent": "WAN_tx_bytes",
+                "PacketsReceived": "WAN_rx_packets",
+                "PacketsSent": "WAN_tx_packets",
+                "LinkSpeed": "WAN_link_speed_mbps",
+            }
+            for key, attr in field_map.items():
+                value = port.get(key)
+                if value is not None and str(value).isdigit():
+                    out[attr] = int(value)
+        except Exception as ex:
+            _LOGGER.debug("WAN port traffic not available: %s", ex)
+        return out
 
     def get_pon_optical_info(self) -> dict[str, Any]:
         """Fetch GPON optical diagnostics. Model-gated: {} unless tag_pon_optical_* is set (F6600P, F6745Q)."""
